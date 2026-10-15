@@ -1,0 +1,39 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "debug_pintos",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/pintos/threads/build/kernel.o",
+            "cwd": "${workspaceFolder}/pintos/threads/build",
+            "MIMode": "gdb",
+            "targetArchitecture": "x64",
+            "miDebuggerPath": "/usr/bin/gdb",
+            "miDebuggerServerAddress": "127.0.0.1:1234",
+            "debugServerPath": "/usr/bin/python3",
+            "debugServerArgs": "-u \"${workspaceFolder}/.vscode/pintos-debug.py\" alarm-single",
+            "serverStarted": "Pintos GDB server ready",
+            "serverLaunchTimeout": 20000,
+            "filterStdout": true,
+            "filterStderr": false,
+            "hardwareBreakpoints": {
+                "require": true
+            },
+            "customLaunchSetupCommands": [
+                {
+                    "text": "-file-exec-and-symbols \"${workspaceFolder}/pintos/threads/build/kernel.o\""
+                },
+                {
+                    "text": "-target-select remote 127.0.0.1:1234"
+                }
+            ],
+            "launchCompleteCommand": "exec-continue",
+            "stopAtEntry": false,
+            "externalConsole": false,
+            "internalConsoleOptions": "openOnSessionStart",
+            "preLaunchTask": "Build Pintos",
+            "postDebugTask": "Show Pintos test result"
+        }
+    ]
+}

@@ -1,0 +1,58 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "pintos: run current test",
+            "type": "shell",
+            "command": "set -e; T=${relativeFileDirname}/${fileBasenameNoExtension}; T=${T#*tests/}; cd ${workspaceFolder}/pintos/${input:project}; make; cd build; rm -f tests/$T.output tests/$T.result; make tests/$T.result || true; echo; echo '===== RESULT ====='; cat tests/$T.result",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "pintos: run test",
+            "type": "shell",
+            "command": "set -e; T=${input:test}; case $T in */*) ;; *) T=${input:project}/$T;; esac; cd ${workspaceFolder}/pintos/${input:project}; make; cd build; rm -f tests/$T.output tests/$T.result; make tests/$T.result || true; echo; echo '===== RESULT ====='; cat tests/$T.result",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "pintos: make check",
+            "type": "shell",
+            "command": "set -e; cd ${workspaceFolder}/pintos/${input:project}; make; cd build; make check",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true
+            },
+            "problemMatcher": []
+        }
+    ],
+    "inputs": [
+        {
+            "id": "project",
+            "type": "pickString",
+            "description": "Pintos project",
+            "options": [
+                "threads",
+                "userprog",
+                "vm",
+                "filesys"
+            ],
+            "default": "threads"
+        },
+        {
+            "id": "test",
+            "type": "promptString",
+            "description": "test path under tests/ (e.g. threads/alarm-single)",
+            "default": "threads/alarm-single"
+        }
+    ]
+}
