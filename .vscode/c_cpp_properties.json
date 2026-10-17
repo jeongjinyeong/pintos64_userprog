@@ -11,7 +11,7 @@
                 "${workspaceFolder}/pintos/lib/kernel",
                 "${workspaceFolder}/pintos/tests/threads"
             ],
-            "defines": [],
+            "defines": ["USERPROG"],
             "compilerPath": "/usr/bin/gcc",
             "compilerArgs": [
                 "-nostdinc"

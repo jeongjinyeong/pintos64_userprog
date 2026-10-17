@@ -204,6 +204,9 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
+	while(true){
+		thread_yield();
+	}
 	return -1;
 }
 
@@ -335,10 +338,20 @@ load (const char *file_name, struct intr_frame *if_) {
 		goto done;
 	process_activate (thread_current ());
 
+	char *f = malloc(strlen(file_name) + 1);
+	strlcpy(f, file_name, strlen(file_name) + 1);
+	char *ptr;
+	char *argv[64];
+	char *arg;
+	int argc = 1;
+	argv[0] = strtok_r (f, " ", &ptr);
+	while (arg = strtok_r (NULL, " ", &ptr))
+		argv[argc++] = arg;
+
 	/* Open executable file. */
-	file = filesys_open (file_name);
+	file = filesys_open (argv[0]);
 	if (file == NULL) {
-		printf ("load: %s: open failed\n", file_name);
+		printf ("load: %s: open failed\n", argv[0]);
 		goto done;
 	}
 
@@ -350,7 +363,7 @@ load (const char *file_name, struct intr_frame *if_) {
 			|| ehdr.e_version != 1
 			|| ehdr.e_phentsize != sizeof (struct Phdr)
 			|| ehdr.e_phnum > 1024) {
-		printf ("load: %s: error loading executable\n", file_name);
+		printf ("load: %s: error loading executable\n", argv[0]);
 		goto done;
 	}
 
@@ -416,7 +429,24 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	/* TODO: Your code goes here.
 	 * TODO: Implement argument passing (see project2/argument_passing.html). */
-
+	if_->R.rdi = argc;
+	int idx = argc - 1;
+	while (idx--) {
+		char *s = argv[idx];
+		if_->rsp = if_->rsp - (strlen(s) + 1);
+		strlcpy((char *)if_->rsp, s, strlen(s) + 1);
+	}
+	if_->rsp  = if_->rsp & ~0x7 - 8;
+	idx = argc - 1;
+	*(char **)if_->rsp = NULL;
+	while (idx--) {
+		if_->rsp = if_->rsp - 8;
+		*(char **)if_->rsp = argv[idx];
+	}
+	if_->R.rsi = if_->rsp;
+	if_->rsp -= 8;
+	*(uintptr_t *)if_->rsp = 0;
+	
 	success = true;
 
 done:
