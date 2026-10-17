@@ -204,9 +204,47 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
-	while (1)
-		thread_yield();
+	// for (int i = 0; i < 2000; i++)
+	// 	thread_yield();
 
+	enum intr_level old_level = intr_disable ();
+
+	struct thread *curr = thread_current ();
+	struct shared_status *child_ss = NULL;
+
+	/* 자식 찾기 */
+	if (list_empty(&curr->children)) 
+		goto fail;
+
+	struct list_elem *cur_elem = list_front (&curr->children);
+	while (cur_elem != list_end (&curr->children)) {
+		struct shared_status *cur_ss = list_entry(cur_elem, struct shared_status, elem);
+		struct list_elem *next_elem = list_next (cur_elem);
+
+		if (cur_ss->tid == child_tid) {
+			child_ss = cur_ss;
+			break;
+		}
+		cur_elem = next_elem;
+	}
+
+	/* 자식 없으면 실패 */
+	if (!child_ss)
+		goto fail;
+
+	sema_down (&child_ss->sema);
+	list_remove (cur_elem);
+
+	int exit_status = child_ss->exit_status;
+	child_ss->ref_cnt--;
+	if (child_ss->ref_cnt == 0)
+		free(child_ss);
+
+	intr_set_level (old_level);
+	return exit_status;
+
+fail:
+	intr_set_level (old_level);
 	return -1;
 }
 
@@ -219,7 +257,42 @@ process_exit (void) {
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
 
+	enum intr_level old_level = intr_disable ();
+
+	/* 부모 입장, 내 자식이 있는 경우 */
+	if (!list_empty (&curr->children)) {
+		struct list_elem *cur_elem = list_front (&curr->children);
+		while (cur_elem != list_end (&curr->children)) {
+			struct shared_status *cur_ss = list_entry(cur_elem, struct shared_status, elem);
+			struct list_elem *next_elem = list_next (cur_elem);
+			cur_ss->ref_cnt--;
+			list_remove(cur_elem);
+
+			/* 자식이 먼저 죽어 있는 경우 */
+			if (cur_ss->ref_cnt == 0) 
+				free (cur_ss);
+
+			cur_elem = next_elem;
+		}
+	}
+
+	/* 종료 전에 프로세스 정리 */
 	process_cleanup ();
+
+	/* 자식 입장*/
+	if (curr->ss != NULL) {
+		/* 부모를 먼저 깨운다. */
+		sema_up (&curr->ss->sema);
+
+		/* 이후 부모가 먼저죽던, 자식이 먼저 죽던 메모리는 해제된다.*/
+		curr->ss->ref_cnt--;
+		if (curr->ss->ref_cnt == 0)
+			free (curr->ss);
+
+		curr->ss = NULL;
+	}
+
+	intr_set_level (old_level);
 }
 
 /* Free the current process's resources. */
@@ -354,6 +427,9 @@ load (const char *file_name, struct intr_frame *if_) {
 	strlcpy (copy, file_name, size);
 	for (token = strtok_r (copy, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr))
 		argv[argc++] = token;
+
+	/* 출력용 파일 이름 복사 */
+	strlcpy (t->file_name, argv[0], strlen(argv[0]) + 1);
 
 	/* Open executable file. */
 	file = filesys_open (argv[0]);

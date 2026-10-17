@@ -103,6 +103,7 @@ struct thread {
 	/*shared status for wait()*/
 	struct list children;
 	struct shared_status *ss;
+	char file_name[128];
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */

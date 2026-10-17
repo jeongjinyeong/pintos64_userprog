@@ -300,6 +300,9 @@ thread_create (const char *name, int priority,
 	/* 부모에게 shared_status 공유 */
 	/* shared status 초기화 */
 	t->ss = malloc(sizeof(struct shared_status));
+	t->ss->tid = tid;
+	t->ss->ref_cnt = 2;
+	sema_init(&t->ss->sema, 0);
 	list_push_back(&thread_current()->children, &t->ss->elem);
 
 	/* Add to run queue. */
@@ -531,6 +534,7 @@ init_thread (struct thread *t, const char *name, int priority) {
 	list_init(&t->donors);
 	/* shared status list 초기화 */
 	list_init (&t->children);
+	t->ss = NULL;
 	t->lock = NULL;
 }
 
