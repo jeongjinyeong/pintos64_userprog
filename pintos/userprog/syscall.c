@@ -40,7 +40,27 @@ syscall_init (void) {
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
-	// TODO: Your implementation goes here.
-	printf ("system call!\n");
-	thread_exit ();
+	// TODO: Your implementation goes here.	
+	uint64_t sys_call_num = (f->R.rax);	
+
+	/* syscall parsing _ljw */
+	switch (sys_call_num) {			
+		case SYS_WRITE:	
+			int fd = f->R.rdi;
+			char *buf = f->R.rsi;
+			int size = f->R.rdx;
+
+			/* fd가 왜 필요한가? 1번이면 콘솔에 쓴다는 것은 알겠는데 */
+			if (fd == STDOUT_FILENO) {
+				putbuf(buf, size);
+				f->R.rax = size;
+			}
+		break;
+
+		default :
+
+		break;
+	}
+
+	// thread_exit ();
 }

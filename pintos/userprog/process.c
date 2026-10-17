@@ -18,6 +18,7 @@
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
+#include "threads/malloc.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -204,6 +205,11 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
+	
+	while (true) {		
+		thread_yield();
+	}
+
 	return -1;
 }
 
@@ -328,6 +334,7 @@ load (const char *file_name, struct intr_frame *if_) {
 	off_t file_ofs;
 	bool success = false;
 	int i;
+	char *str_file_name = NULL;
 
 	/* Allocate and activate page directory. */
 	t->pml4 = pml4_create ();
@@ -335,10 +342,47 @@ load (const char *file_name, struct intr_frame *if_) {
 		goto done;
 	process_activate (thread_current ());
 
+	/* TODO: Your code goes here.
+	 * TODO: Implement argument passing (see project2/argument_passing.html). */
+	int argc = 0;
+	int len_arg[128];
+	int total_len = 0;
+	int after_align_len = 0;
+	int word_align = 0;
+
+	char *argv[128];
+	char *token;
+	char *save_ptr;
+	
+	str_file_name = malloc((strlen(file_name) + 1));
+	if (str_file_name == NULL)
+		goto done;
+
+	strlcpy(str_file_name, file_name, strlen(file_name) + 1);
+	
+	/* 1. 문자열을 잘라서 각 단위로 크기를 구하고
+	   2. 스택 포인터에서 역산해서 주소를 구한 다음
+	   3. 그 주소에 실제로 그 데이터를 저장. */	
+	for (token = strtok_r (str_file_name, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr)) {
+    	if (argc >= 128)
+        	goto done;		
+
+		argv[argc] = token; 		
+		len_arg[argc] = strlen(token) + 1;					
+		total_len += len_arg[argc++];		
+	}
+
+	// memcpy (cur_addr_ptr + sizeof(char*), 0, sizeof(char*));
+	// memcpy (if_->rsp, 0, sizeof(char*));
+
 	/* Open executable file. */
-	file = filesys_open (file_name);
+	// file = filesys_open (file_name); comment out _ljw
+	if (argc == 0)
+		goto done;
+	
+	file = filesys_open (argv[0]);
 	if (file == NULL) {
-		printf ("load: %s: open failed\n", file_name);
+		printf ("load: %s: open failed\n", argv[0]);
 		goto done;
 	}
 
@@ -350,7 +394,7 @@ load (const char *file_name, struct intr_frame *if_) {
 			|| ehdr.e_version != 1
 			|| ehdr.e_phentsize != sizeof (struct Phdr)
 			|| ehdr.e_phnum > 1024) {
-		printf ("load: %s: error loading executable\n", file_name);
+		printf ("load: %s: error loading executable\n", argv[0]);
 		goto done;
 	}
 
@@ -411,16 +455,43 @@ load (const char *file_name, struct intr_frame *if_) {
 	if (!setup_stack (if_))
 		goto done;
 
+	/* align 계산 */
+	after_align_len = (total_len & 0x7) == 0? total_len : (total_len & ~0x7) + 8;
+	word_align = after_align_len - total_len;
+
+	if_->rsp -= after_align_len;	
+	if_->rsp -= sizeof(char*);	
+
+	char *cur_data_ptr = (char *)if_->rsp + (sizeof(char*) + word_align);
+	char *cur_addr_ptr = (char *)if_->rsp - sizeof(char*) * argc;
+
+	/* 반복문 시작 전에 배열 시작 주소 보관. */
+	char **user_argv = (char **)cur_addr_ptr;
+
+	for (int i = 0; i < argc; i++) {		
+		char * ptr = (char*) memcpy (cur_data_ptr, argv[i], len_arg[i]);		
+		memcpy (cur_addr_ptr, &ptr, sizeof(char*));
+		
+		cur_data_ptr += len_arg[i];
+		cur_addr_ptr += sizeof(char*);
+	}		
+	// *((char *)cur_addr_ptr + sizeof(char*)) = NULL;
+	*(char **)cur_addr_ptr = NULL;		
+	
+	if_->R.rdi = argc;
+	if_->R.rsi = (uintptr_t)user_argv;
+
+	// if_->rsp -= sizeof(char*);	
+	if_->rsp = (uintptr_t)user_argv - sizeof(uintptr_t);
+	*(uintptr_t *)(if_->rsp) = 0;
+
 	/* Start address. */
-	if_->rip = ehdr.e_entry;
-
-	/* TODO: Your code goes here.
-	 * TODO: Implement argument passing (see project2/argument_passing.html). */
-
+	if_->rip = ehdr.e_entry;		
 	success = true;
 
 done:
 	/* We arrive here whether the load is successful or not. */
+	free(str_file_name);
 	file_close (file);
 	return success;
 }
