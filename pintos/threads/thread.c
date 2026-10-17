@@ -297,6 +297,11 @@ thread_create (const char *name, int priority,
 	t->tf.cs = SEL_KCSEG;
 	t->tf.eflags = FLAG_IF;
 
+	/* 부모에게 shared_status 공유 */
+	/* shared status 초기화 */
+	t->ss = malloc(sizeof(struct shared_status));
+	list_push_back(&thread_current()->children, &t->ss->elem);
+
 	/* Add to run queue. */
 	thread_unblock (t);
 
@@ -524,6 +529,8 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->deadline = 0;
 	t->magic = THREAD_MAGIC;
 	list_init(&t->donors);
+	/* shared status list 초기화 */
+	list_init (&t->children);
 	t->lock = NULL;
 }
 

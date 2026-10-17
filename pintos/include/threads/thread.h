@@ -100,6 +100,9 @@ struct thread {
 	struct list donors;
 	struct lock *lock;
 
+	/*shared status for wait()*/
+	struct list children;
+	struct shared_status *ss;
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */

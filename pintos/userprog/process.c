@@ -204,6 +204,9 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
+	while (1)
+		thread_yield();
+
 	return -1;
 }
 
@@ -328,6 +331,11 @@ load (const char *file_name, struct intr_frame *if_) {
 	off_t file_ofs;
 	bool success = false;
 	int i;
+	/*Argument Passing 변수 (종민)*/
+	char *argv[128];
+	char *save_ptr;
+	int argc = 0;
+	char *token;
 
 	/* Allocate and activate page directory. */
 	t->pml4 = pml4_create ();
@@ -335,10 +343,22 @@ load (const char *file_name, struct intr_frame *if_) {
 		goto done;
 	process_activate (thread_current ());
 
+	/*문자열 복제*/
+	size_t size = strlen (file_name) + 1;
+	char *copy = malloc (size);
+
+	if (copy == NULL)
+		goto done;
+
+	/*문자열 파싱*/
+	strlcpy (copy, file_name, size);
+	for (token = strtok_r (copy, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr))
+		argv[argc++] = token;
+
 	/* Open executable file. */
-	file = filesys_open (file_name);
+	file = filesys_open (argv[0]);
 	if (file == NULL) {
-		printf ("load: %s: open failed\n", file_name);
+		printf ("load: %s: open failed\n", argv[0]);
 		goto done;
 	}
 
@@ -350,7 +370,7 @@ load (const char *file_name, struct intr_frame *if_) {
 			|| ehdr.e_version != 1
 			|| ehdr.e_phentsize != sizeof (struct Phdr)
 			|| ehdr.e_phnum > 1024) {
-		printf ("load: %s: error loading executable\n", file_name);
+		printf ("load: %s: error loading executable\n", argv[0]);
 		goto done;
 	}
 
@@ -414,8 +434,36 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* Start address. */
 	if_->rip = ehdr.e_entry;
 
-	/* TODO: Your code goes here.
-	 * TODO: Implement argument passing (see project2/argument_passing.html). */
+	/*인자를 사용자 스택에 복사*/
+	for (int i = argc - 1; i >= 0; i--) {
+		size_t len = strlen (argv[i]) + 1;
+
+		if_->rsp -= len;
+		memcpy ((void *) if_->rsp, argv[i], len);
+		argv[i] = (char *) if_->rsp;
+	}
+
+	/* padding */
+	if_->rsp &= ~((uintptr_t) 0x7);
+
+	/* 문자열 주소 배열 종료 */
+	if_->rsp -= sizeof(char *);
+	*(char **) if_->rsp = NULL;
+
+	/*main이 사용할 복사한 문자열의 주소를 사용자 스택에 입력*/
+	for (int j = argc - 1; j >= 0; j--) {
+		if_->rsp -= sizeof(char *);
+		*(char **)if_->rsp = argv[j];
+	}
+
+	if_->R.rdi = argc;
+	if_->R.rsi = if_->rsp;
+
+	/* 가짜 반환 함수 */
+	if_->rsp -= sizeof (uintptr_t);
+	*(uintptr_t *) if_->rsp = 0;
+
+	free (copy);
 
 	success = true;
 
