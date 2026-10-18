@@ -204,8 +204,6 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
-	// for (int i = 0; i < 2000; i++)
-	// 	thread_yield();
 
 	enum intr_level old_level = intr_disable ();
 
@@ -232,13 +230,21 @@ process_wait (tid_t child_tid UNUSED) {
 	if (!child_ss)
 		goto fail;
 
+	/* 
+	* 자식이 살아있으면 BLOCKED
+	* 자식이 죽어있으면 sema == 1이므로 그대로 진행
+	*/
 	sema_down (&child_ss->sema);
+
+	/* 자식을 한번 더 wait하는걸 방지하기위해 제거 */
 	list_remove (cur_elem);
 
 	int exit_status = child_ss->exit_status;
+
+	/* 자식이 죽어있는 경우 free */
 	child_ss->ref_cnt--;
 	if (child_ss->ref_cnt == 0)
-		free(child_ss);
+		free (child_ss);
 
 	intr_set_level (old_level);
 	return exit_status;

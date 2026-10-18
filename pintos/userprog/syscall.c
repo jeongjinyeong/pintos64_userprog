@@ -47,8 +47,6 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		case SYS_HALT:
 			break;    
 		case SYS_EXIT:
-			// if (부모 뒈짓)
-			// else()
 			thread_current()->ss->exit_status = f->R.rdi;
 			printf ("%s: exit(%d)\n", thread_current()->file_name, f->R.rdi);
 			thread_exit();
@@ -58,7 +56,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		case SYS_EXEC:
 			break;    
 		case SYS_WAIT:
-			process_wait(f->R.rdi);
+			f->R.rax = process_wait(f->R.rdi);
 			break;    
 		case SYS_CREATE:
 			break;  
@@ -73,7 +71,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		case SYS_WRITE:
 			if (f->R.rdi == STDOUT_FILENO)
 				putbuf(f->R.rsi, f->R.rdx);
-				f->R.rax = f->R.rdx; // 이유는 모르겠는데 일단 반환하라는 듯
+				f->R.rax = f->R.rdx; // 시스템 콜의 반환값을 받고 유저 모드에게 전달
 			break;   
 		case SYS_SEEK:
 			break;    
@@ -84,7 +82,4 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		default:
 			break;
 	}
-
-	//printf ("system call!\n");
-	//thread_exit ();
 }
