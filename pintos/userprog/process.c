@@ -54,6 +54,7 @@ process_create_initd (const char *file_name) {
 	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
+	
 	return tid;
 }
 
@@ -204,9 +205,24 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
-	while(true){
-		thread_yield();
+	struct thread *curr = thread_current ();
+	if (list_begin (&curr->children) == list_end (&curr->children))
+		return -1;
+	for (struct list_elem *e = list_begin (&curr->children); e != list_end (&curr->children); e = e->next) {
+		struct shared_status *_ss = list_entry (e, struct shared_status, elem);
+		if (_ss->tid == child_tid) {
+			sema_down (&_ss->sema);
+			_ss->ref_cnt--;
+			list_remove(e);
+			if(_ss->ref_cnt < 0)
+				return -1;
+			return _ss->exit_status;
+		}
 	}
+	
+	// while (true) {
+	// 	thread_yield ();
+	// }
 	return -1;
 }
 
@@ -219,7 +235,32 @@ process_exit (void) {
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
 
+	enum intr_level old_level = intr_disable ();
+
+	if (list_begin (&curr->children) != list_end (&curr->children)) {
+		for (struct list_elem *e = list_begin(&curr->children); e != list_end (&curr->children); e = list_remove(e)){
+			struct shared_status *_ss = list_entry (e, struct shared_status, elem);
+			_ss->ref_cnt--;
+			if (_ss->ref_cnt == 0) {
+				free (_ss);
+			}
+		}
+	}
+
+	if(curr->ss){
+		printf ("%s: exit(%d)\n", curr->name, curr->ss->exit_status);
+
+		curr->ss->ref_cnt--;
+		if (curr->ss->ref_cnt == 0) {
+			free (curr->ss);
+			curr->ss = NULL;
+		}
+		else {
+			sema_up (&curr->ss->sema);
+		}
+	}
 	process_cleanup ();
+	intr_set_level (old_level);
 }
 
 /* Free the current process's resources. */
@@ -348,6 +389,8 @@ load (const char *file_name, struct intr_frame *if_) {
 	while (arg = strtok_r (NULL, " ", &ptr))
 		argv[argc++] = arg;
 
+	strlcpy (t->name, argv[0], t->name);
+
 	/* Open executable file. */
 	file = filesys_open (argv[0]);
 	if (file == NULL) {
@@ -430,14 +473,15 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* TODO: Your code goes here.
 	 * TODO: Implement argument passing (see project2/argument_passing.html). */
 	if_->R.rdi = argc;
-	int idx = argc - 1;
+	int idx = argc;
 	while (idx--) {
 		char *s = argv[idx];
 		if_->rsp = if_->rsp - (strlen(s) + 1);
 		strlcpy((char *)if_->rsp, s, strlen(s) + 1);
+		argv[idx] = if_->rsp;
 	}
-	if_->rsp  = if_->rsp & ~0x7 - 8;
-	idx = argc - 1;
+	if_->rsp  = (if_->rsp & ~0x7) - 8;
+	idx = argc;
 	*(char **)if_->rsp = NULL;
 	while (idx--) {
 		if_->rsp = if_->rsp - 8;
@@ -451,6 +495,8 @@ load (const char *file_name, struct intr_frame *if_) {
 
 done:
 	/* We arrive here whether the load is successful or not. */
+	free(f);
+
 	file_close (file);
 	return success;
 }

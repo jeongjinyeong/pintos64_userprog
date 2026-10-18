@@ -5,6 +5,7 @@
 #include "threads/thread.h"
 #include "threads/loader.h"
 #include "userprog/gdt.h"
+#include "userprog/process.h"
 #include "threads/flags.h"
 #include "intrinsic.h"
 
@@ -46,7 +47,12 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		if (f->R.rdi == 1)
 			putbuf((char *)f->R.rsi, f->R.rdx);
 		break;
+		case SYS_EXIT:
+			thread_current()->ss->exit_status = f->R.rdi;
+			thread_exit();
 		default:
 		break;
 	}
+
+	// thread_exit ();
 }
