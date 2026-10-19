@@ -5,6 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include "threads/interrupt.h"
+// #include "include/userprog/process.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -27,6 +28,8 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
+
+struct shared_status;
 
 /* A kernel thread or user process.
  *
@@ -100,10 +103,8 @@ struct thread {
 	struct list donors;
 	struct lock *lock;
 
-	/*shared status for wait()*/
-	struct list children;
 	struct shared_status *ss;
-	char file_name[128];
+	struct list children;
 
 	/* file discriptor */
 	struct list file_discriptor;

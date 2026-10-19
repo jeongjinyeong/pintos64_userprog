@@ -3,11 +3,11 @@
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
-#include "userprog/process.h"
 #include "threads/loader.h"
 #include "userprog/gdt.h"
 #include "threads/flags.h"
 #include "intrinsic.h"
+#include "userprog/process.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -41,49 +41,57 @@ syscall_init (void) {
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
-	// TODO: Your implementation goes here.
-
+	struct thread *curr = thread_current();
 	switch (f->R.rax) {
-		case SYS_HALT:
+		case SYS_HALT :
 			power_off();
-			break;    
-		case SYS_EXIT:
-			/* 출력용 */
-			thread_current()->ss->exit_status = f->R.rdi;
-			printf ("%s: exit(%d)\n", thread_current()->file_name, f->R.rdi);
-			/* 스레드 exit*/
-			thread_exit();
-			break;    
-		case SYS_FORK:
-			break;    
-		case SYS_EXEC:
-			break;    
-		case SYS_WAIT:
-			f->R.rax = process_wait(f->R.rdi);
-			break;    
-		case SYS_CREATE:
-			f->R.rax = filesys_create(f->R.rdi, f->R.rsi);
-			break;  
-		case SYS_REMOVE:
-			break;  
-		case SYS_OPEN:
-			break;    
-		case SYS_FILESIZE:
 			break;
-		case SYS_READ:
-			break;    
-		case SYS_WRITE:
-			if (f->R.rdi == STDOUT_FILENO)
-				putbuf(f->R.rsi, f->R.rdx);
-				f->R.rax = f->R.rdx; // 시스템 콜의 반환값을 받고 유저 모드에게 전달
-			break;   
-		case SYS_SEEK:
-			break;    
-		case SYS_TELL:
-			break;    
-		case SYS_CLOSE:
-			break;   
-		default:
+		case SYS_EXIT :
+			curr->ss->exit_status = f->R.rdi;		
+			thread_exit ();
+			NOT_REACHED ();
+			break;
+		case SYS_FORK :	
+			process_fork(curr->name, f);
+		case SYS_EXEC :
+			break;
+		case SYS_WAIT :
+			/* 인자는 rdi */
+			f->R.rax = process_wait((tid_t)f->R.rdi);
+			break;
+		case SYS_CREATE :
+			f->R.rax = filesys_create(f->R.rdi, f->R.rsi);
+			break;
+		case SYS_REMOVE :
+		case SYS_OPEN :
+		case SYS_FILESIZE :
+		case SYS_READ :
+			break;
+		case SYS_WRITE :
+			if (f->R.rdi == STDOUT_FILENO) {
+				putbuf ((char *)f->R.rsi, f->R.rdx);
+				f->R.rax = f->R.rdx;	
+			}
+			break;
+		case SYS_SEEK :
+		case SYS_TELL :
+		case SYS_CLOSE :
+		case SYS_DUP2 :
+		case SYS_MMAP :
+		case SYS_MUNMAP :
+		case SYS_CHDIR :
+		case SYS_MKDIR :
+		case SYS_READDIR :
+		case SYS_ISDIR :
+		case SYS_INUMBER :
+		case SYS_SYMLINK :
+		case SYS_MOUNT :
+		case SYS_UMOUNT :
+			break;
+
+		default :
 			break;
 	}
+
 }
+

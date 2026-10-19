@@ -297,13 +297,26 @@ thread_create (const char *name, int priority,
 	t->tf.cs = SEL_KCSEG;
 	t->tf.eflags = FLAG_IF;
 
-	/* 부모에게 shared_status 공유 */
-	/* shared status 초기화 */
-	t->ss = malloc(sizeof(struct shared_status));
-	t->ss->tid = tid;
-	t->ss->ref_cnt = 2;
+	/* Initialize shared_status */
+	if (function == idle) {
+		thread_unblock (t);
+		yield_priority_handler(t);
+		
+		return tid;
+	}
+		
+	t->ss = malloc(sizeof(struct shared_status));	
+	if (t->ss == NULL) {
+		palloc_free_page(t);
+		return TID_ERROR;
+	}	
+
+	t->ss->tid = tid;	
+	t->ss->exit_status = -1;
+	t->ss->ref_cnt = 2;	
 	sema_init(&t->ss->sema, 0);
-	list_push_back(&thread_current()->children, &t->ss->elem);
+	
+	list_push_back(&thread_current()->children, &t->ss->elem);	
 
 	/* Add to run queue. */
 	thread_unblock (t);
@@ -519,7 +532,7 @@ kernel_thread (thread_func *function, void *aux) {
    NAME. */
 static void
 init_thread (struct thread *t, const char *name, int priority) {
-	ASSERT (t != NULL);
+	ASSERT (t != NULL); 
 	ASSERT (PRI_MIN <= priority && priority <= PRI_MAX);
 	ASSERT (name != NULL);
 

@@ -18,6 +18,7 @@
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
+#include "threads/malloc.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -54,6 +55,7 @@ process_create_initd (const char *file_name) {
 	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
+	
 	return tid;
 }
 
@@ -63,7 +65,6 @@ initd (void *f_name) {
 #ifdef VM
 	supplemental_page_table_init (&thread_current ()->spt);
 #endif
-
 	process_init ();
 
 	if (process_exec (f_name) < 0)
@@ -179,6 +180,9 @@ process_exec (void *f_name) {
 	/* And then load the binary */
 	success = load (file_name, &_if);
 
+	/* 레지스터 값 찍어보는 코드 - HJM */
+	// hex_dump(_if.rsp, _if.rsp, USER_STACK - _if.rsp, true);
+
 	/* If load failed, quit. */
 	palloc_free_page (file_name);
 	if (!success)
@@ -201,104 +205,75 @@ process_exec (void *f_name) {
  * does nothing. */
 int
 process_wait (tid_t child_tid UNUSED) {
-	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
-	 * XXX:       to add infinite loop here before
-	 * XXX:       implementing the process_wait. */
-
-	enum intr_level old_level = intr_disable ();
-
 	struct thread *curr = thread_current ();
-	struct shared_status *child_ss = NULL;
+	struct list_elem *e;	
+	struct list *c_list = &curr->children;	
 
-	/* 자식 찾기 */
-	if (list_empty(&curr->children)) 
-		goto fail;
+	for (e = list_begin (c_list); e != list_end (c_list); e = list_next (e)) {
+		struct shared_status *ss = list_entry(e, struct shared_status, elem);
 
-	struct list_elem *cur_elem = list_front (&curr->children);
-	while (cur_elem != list_end (&curr->children)) {
-		struct shared_status *cur_ss = list_entry(cur_elem, struct shared_status, elem);
-		struct list_elem *next_elem = list_next (cur_elem);
+		if (ss->tid == child_tid) {
+			sema_down(&ss->sema);
+			list_remove(e);
 
-		if (cur_ss->tid == child_tid) {
-			child_ss = cur_ss;
-			break;
+			int status = ss->exit_status;
+
+			enum intr_level old_level = intr_disable();
+
+			ss->ref_cnt--;								
+			if (ss->ref_cnt == 0)
+				free(ss);
+
+			intr_set_level(old_level);
+			return status;
 		}
-		cur_elem = next_elem;
 	}
-
-	/* 자식 없으면 실패 */
-	if (!child_ss)
-		goto fail;
-
-	/* 
-	* 자식이 살아있으면 BLOCKED
-	* 자식이 죽어있으면 sema == 1이므로 그대로 진행
-	*/
-	sema_down (&child_ss->sema);
-
-	/* 자식을 한번 더 wait하는걸 방지하기위해 제거 */
-	list_remove (cur_elem);
-
-	int exit_status = child_ss->exit_status;
-
-	/* 자식이 죽어있는 경우 free */
-	child_ss->ref_cnt--;
-	if (child_ss->ref_cnt == 0)
-		free (child_ss);
-
-	intr_set_level (old_level);
-	return exit_status;
-
-fail:
-	intr_set_level (old_level);
 	return -1;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
 void
 process_exit (void) {
-	struct thread *curr = thread_current ();
-	/* TODO: Your code goes here.
-	 * TODO: Implement process termination message (see
-	 * TODO: project2/process_termination.html).
-	 * TODO: We recommend you to implement process resource cleanup here. */
+	struct thread *curr = thread_current ();				
+	struct shared_status *self_ss;			
 
-	enum intr_level old_level = intr_disable ();
+	if (curr == NULL) 
+		return;	
 
-	/* 부모 입장, 내 자식이 있는 경우 */
-	if (!list_empty (&curr->children)) {
-		struct list_elem *cur_elem = list_front (&curr->children);
-		while (cur_elem != list_end (&curr->children)) {
-			struct shared_status *cur_ss = list_entry(cur_elem, struct shared_status, elem);
-			struct list_elem *next_elem = list_next (cur_elem);
-			cur_ss->ref_cnt--;
-			list_remove(cur_elem);
+	uint64_t *pml4 = curr->pml4;
+	struct list *c_list = &curr->children;						
 
-			/* 자식이 먼저 죽어 있는 경우 */
-			if (cur_ss->ref_cnt == 0) 
-				free (cur_ss);
+	while (!list_empty(c_list)) {
+		enum intr_level old_level = intr_disable();
 
-			cur_elem = next_elem;
-		}
+		struct list_elem *e = list_pop_front(c_list);
+		struct shared_status *child_ss = list_entry(e, struct shared_status, elem);
+				
+		child_ss->ref_cnt--;							
+		if (child_ss->ref_cnt == 0) 
+			free(child_ss);		
+
+		intr_set_level(old_level);
 	}
-
-	/* 종료 전에 프로세스 정리 */
+	
+	self_ss = curr->ss;
 	process_cleanup ();
 
-	/* 자식 입장*/
-	if (curr->ss != NULL) {
-		/* 부모를 먼저 깨운다. */
-		sema_up (&curr->ss->sema);
+	if (self_ss == NULL) 	
+		return;	
+		
+	enum intr_level old_level = intr_disable();	
 
-		/* 이후 부모가 먼저죽던, 자식이 먼저 죽던 메모리는 해제된다.*/
-		curr->ss->ref_cnt--;
-		if (curr->ss->ref_cnt == 0)
-			free (curr->ss);
+	if (pml4 != NULL)
+		printf ("%s: exit(%d)\n", curr->name, self_ss->exit_status);
 
-		curr->ss = NULL;
-	}
+	sema_up(&self_ss->sema);	 
 
-	intr_set_level (old_level);
+	self_ss->ref_cnt--;		
+	if (self_ss->ref_cnt == 0)
+		free(self_ss);			
+
+	intr_set_level(old_level);			
 }
 
 /* Free the current process's resources. */
@@ -435,7 +410,7 @@ load (const char *file_name, struct intr_frame *if_) {
 		argv[argc++] = token;
 
 	/* 출력용 파일 이름 복사 */
-	strlcpy (t->file_name, argv[0], strlen(argv[0]) + 1);
+	strlcpy (&t->name, argv[0], strlen(argv[0]) + 1);
 
 	/* Open executable file. */
 	file = filesys_open (argv[0]);
@@ -512,7 +487,7 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* Set up stack. */
 	if (!setup_stack (if_))
 		goto done;
-
+	
 	/* Start address. */
 	if_->rip = ehdr.e_entry;
 
@@ -547,10 +522,12 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	free (copy);
 
+	
 	success = true;
 
 done:
 	/* We arrive here whether the load is successful or not. */
+
 	file_close (file);
 	return success;
 }
