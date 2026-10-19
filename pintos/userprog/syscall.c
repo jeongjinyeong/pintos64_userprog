@@ -7,6 +7,8 @@
 #include "userprog/gdt.h"
 #include "threads/flags.h"
 #include "intrinsic.h"
+// #include "threads/synch.h"
+#include "userprog/process.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -40,7 +42,65 @@ syscall_init (void) {
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
-	// TODO: Your implementation goes here.
-	printf ("system call!\n");
-	thread_exit ();
+	struct thread *curr = thread_current();
+	switch (f->R.rax) {
+		case SYS_HALT :
+			return ;
+
+		case SYS_EXIT :
+			curr->exit_status = f->R.rdi; // 임시 출력용.
+			// printf ("%s: exit(%d)\n", curr->fn, curr->exit_status);
+		
+			thread_exit ();
+			NOT_REACHED ();
+		
+		case SYS_FORK :
+			
+			process_fork(curr->name, f);
+		case SYS_EXEC :
+			break;
+		case SYS_WAIT :
+			/* 인자는 rdi */
+
+			f->R.rax = process_wait((tid_t)f->R.rdi);
+			return ;
+		case SYS_CREATE :
+		case SYS_REMOVE :
+		case SYS_OPEN :
+		case SYS_FILESIZE :
+		case SYS_READ :
+			break;
+		case SYS_WRITE :
+			if (f->R.rdi != STDOUT_FILENO)
+				return;
+			putbuf ((char *)f->R.rsi, f->R.rdx);
+			f->R.rax = f->R.rdx; // 일단 하래 ㅋㅋ		
+			return;
+		case SYS_SEEK :
+		case SYS_TELL :
+		case SYS_CLOSE :
+		case SYS_DUP2 :
+		case SYS_MMAP :
+		case SYS_MUNMAP :
+		case SYS_CHDIR :
+		case SYS_MKDIR :
+		case SYS_READDIR :
+		case SYS_ISDIR :
+		case SYS_INUMBER :
+		case SYS_SYMLINK :
+		case SYS_MOUNT :
+		case SYS_UMOUNT :
+			break;
+			
+	
+
+		default :
+			break;
+	}
+	thread_exit();
+	NOT_REACHED();
+
+	// printf ("system call!\n");
+	// thread_exit ();
 }
+

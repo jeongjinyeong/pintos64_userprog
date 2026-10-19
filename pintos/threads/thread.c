@@ -297,6 +297,13 @@ thread_create (const char *name, int priority,
 	t->tf.cs = SEL_KCSEG;
 	t->tf.eflags = FLAG_IF;
 
+	struct thread *curr = thread_current ();
+	t->ss = malloc (sizeof(struct shared_status));
+	sema_init (&t->ss->sema, 0);
+	t->ss->tid = tid;
+	t->ss->ref_cnt = 2;
+	t->exit_status = -1;
+	list_push_back (&curr->children, &t->ss->elem);
 	/* Add to run queue. */
 	thread_unblock (t);
 
@@ -525,6 +532,10 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->magic = THREAD_MAGIC;
 	list_init(&t->donors);
 	t->lock = NULL;
+	list_init (&t->children);
+	t->ss = NULL;
+	t->is_user_process = false;
+	// sema_init (&t->ss->sema, 1);
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should

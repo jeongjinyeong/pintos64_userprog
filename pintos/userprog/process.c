@@ -63,7 +63,7 @@ initd (void *f_name) {
 #ifdef VM
 	supplemental_page_table_init (&thread_current ()->spt);
 #endif
-
+	thread_current ()->is_user_process = true;
 	process_init ();
 
 	if (process_exec (f_name) < 0)
@@ -125,6 +125,7 @@ __do_fork (void *aux) {
 	struct intr_frame *parent_if;
 	bool succ = true;
 
+	current->is_user_process = true;
 	/* 1. Read the cpu context to local stack. */
 	memcpy (&if_, parent_if, sizeof (struct intr_frame));
 
@@ -179,6 +180,9 @@ process_exec (void *f_name) {
 	/* And then load the binary */
 	success = load (file_name, &_if);
 
+	/* 레지스터 값 찍어보는 코드 - HJM */
+	// hex_dump(_if.rsp, _if.rsp, USER_STACK - _if.rsp, true);
+
 	/* If load failed, quit. */
 	palloc_free_page (file_name);
 	if (!success)
@@ -204,6 +208,30 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
+	// for (int i = 0; i < 1000; i++) { thread_yield(); }
+	struct thread *curr = thread_current();
+	if (list_empty(&curr->children))
+		return -1;
+	else {
+		for (struct list_elem *e = list_front (&curr->children); e != list_tail (&curr->children); e = list_next (e)) {
+			tid_t tid = list_entry (e, struct shared_status, elem)->tid;
+			/* children 리스트에 tid 있음. */
+			if (tid == child_tid) {
+				struct shared_status *ss = (list_entry (e, struct shared_status, elem));
+				sema_down (&ss->sema);
+				/* child 프로세스가 exit했음 */
+				list_remove (e);
+				int status = ss->exit_status; /* status 반환용 저장변수. */
+				enum intr_level old_intr = intr_disable ();
+				
+				if (--ss->ref_cnt == 0)
+					free (ss);
+
+				intr_set_level (old_intr);
+				return status;
+			}
+		}
+	}
 	return -1;
 }
 
@@ -216,6 +244,40 @@ process_exit (void) {
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
 
+		/* 자식 프로세스가 먼저 exit */
+		/* curr을 생성한 부모 프로세스가 있다 */
+	if (curr->is_user_process)
+		printf ("%s: exit(%d)\n", curr->fn, curr->exit_status);
+
+	if (curr->ss != NULL) { 				
+		enum intr_level old_intr = intr_disable();
+		if (--curr->ss->ref_cnt == 0)
+			free (curr->ss);
+		else {
+			curr->ss->exit_status = curr->exit_status;
+			sema_up (&curr->ss->sema);
+		}
+		intr_set_level (old_intr);
+	}
+		/* if - else if가 아닌 이유는, curr 스레드는 자식이면서 부모일 수 있기 때문. - HJM */
+		/* 부모 프로세스가 먼저 exit */
+
+	if (!list_empty(&curr->children)) {
+		enum intr_level old_intr = intr_disable();
+		/* 자식의 ref_cnt를 1 빼서 부모가 exit했다는 걸 알림. */
+		while (!list_empty(&curr->children)) {
+			struct list_elem *e = list_pop_front (&curr->children);
+			struct shared_status *ss = list_entry (e, struct shared_status, elem);
+			if (--ss->ref_cnt == 0)
+			free (ss);
+		}
+		intr_set_level (old_intr);
+	}
+	
+	if (curr->fn != NULL) 
+		free (curr->fn);
+	
+cleanup:	
 	process_cleanup ();
 }
 
@@ -335,8 +397,20 @@ load (const char *file_name, struct intr_frame *if_) {
 		goto done;
 	process_activate (thread_current ());
 
+	/* parsing */
+	char *argv[128];
+	int argc = 0;
+	char *save_ptr;
+	char *fn_copy = malloc (strlen (file_name) + 1);
+	strlcpy (fn_copy, file_name, strlen (file_name) + 1);
+	for (char *token = strtok_r (fn_copy, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr)) 
+		argv[argc++] = token;
+	
+	t->fn = malloc (strlen(argv[0]) + 1);
+	strlcpy (t->fn, argv[0], strlen(argv[0]) + 1);
+
 	/* Open executable file. */
-	file = filesys_open (file_name);
+	file = filesys_open (argv[0]);
 	if (file == NULL) {
 		printf ("load: %s: open failed\n", file_name);
 		goto done;
@@ -415,13 +489,34 @@ load (const char *file_name, struct intr_frame *if_) {
 	if_->rip = ehdr.e_entry;
 
 	/* TODO: Your code goes here.
-	 * TODO: Implement argument passing (see project2/argument_passing.html). */
+	 * TODO: Implement argument passing (see project2/argument_passing.html). */ 
 
+	for (int i = argc - 1; i >= 0; i--) {
+		if_->rsp -= strlen (argv[i]) + 1;
+		memcpy ((void *)if_->rsp, argv[i], strlen (argv[i]));
+		argv[i] = (char *)if_->rsp;
+	}
+	if_->rsp = (uintptr_t)if_->rsp & (uintptr_t)(~0x7);
+
+	if_->rsp -= sizeof (char *);
+	*(char **)if_->rsp = NULL;
+	
+	for (int i = argc - 1; i >= 0; i--) {
+		if_->rsp -= sizeof (char *);
+		*(char **)if_->rsp = argv[i];
+	}	
+
+	if_->R.rdi = argc;
+	if_->R.rsi = if_->rsp;
+
+	if_->rsp -= sizeof (uintptr_t);
+	*(uintptr_t *)if_->rsp = 0;
 	success = true;
 
 done:
 	/* We arrive here whether the load is successful or not. */
 	file_close (file);
+	free (fn_copy);
 	return success;
 }
 
