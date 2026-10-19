@@ -58,4 +58,4 @@ vip_func (void *aux UNUSED)
     lock_acquire (&lock_b);
     msg ("VIP acquired lock_b.");
     lock_release (&lock_b);
-}
+}

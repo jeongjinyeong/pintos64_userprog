@@ -12,4 +12,4 @@ check_expected ([<<'EOF']);
 (priority-donate-release-unsorted) T3 acquired lock_a.
 (priority-donate-release-unsorted) end
 EOF
-pass;
+pass;
