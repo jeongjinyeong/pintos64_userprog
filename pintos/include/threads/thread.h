@@ -102,9 +102,6 @@ struct thread {
 	struct list_elem donor;
 	struct list donors;
 	struct lock *lock;
-	int exit_status;
-	char *fn; 							/* File name */
-	bool is_user_process;
 
 	struct shared_status *ss;
 	struct list children;

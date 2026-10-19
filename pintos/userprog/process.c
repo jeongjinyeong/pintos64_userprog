@@ -65,7 +65,6 @@ initd (void *f_name) {
 #ifdef VM
 	supplemental_page_table_init (&thread_current ()->spt);
 #endif
-	thread_current ()->is_user_process = true;
 	process_init ();
 
 	if (process_exec (f_name) < 0)
@@ -127,7 +126,6 @@ __do_fork (void *aux) {
 	struct intr_frame *parent_if;
 	bool succ = true;
 
-	current->is_user_process = true;
 	/* 1. Read the cpu context to local stack. */
 	memcpy (&if_, parent_if, sizeof (struct intr_frame));
 
@@ -269,7 +267,7 @@ process_exit (void) {
 	if (pml4 != NULL)
 		printf ("%s: exit(%d)\n", curr->name, self_ss->exit_status);
 
-	sema_up(&self_ss->sema);	
+	sema_up(&self_ss->sema);	 
 
 	self_ss->ref_cnt--;		
 	if (self_ss->ref_cnt == 0)
@@ -412,7 +410,7 @@ load (const char *file_name, struct intr_frame *if_) {
 		argv[argc++] = token;
 
 	/* 출력용 파일 이름 복사 */
-	strlcpy (t->file_name, argv[0], strlen(argv[0]) + 1);
+	strlcpy (&t->name, argv[0], strlen(argv[0]) + 1);
 
 	/* Open executable file. */
 	file = filesys_open (argv[0]);
