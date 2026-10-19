@@ -4,14 +4,6 @@
 #include "threads/thread.h"
 #include "threads/synch.h"
 
-tid_t process_create_initd (const char *file_name);
-tid_t process_fork (const char *name, struct intr_frame *if_);
-int process_exec (void *f_name);
-int process_wait (tid_t);
-void process_exit (void);
-void process_activate (struct thread *next);
-
-/* Shared between thread.c and process.c */
 struct shared_status {
 
 	tid_t tid;
@@ -21,5 +13,12 @@ struct shared_status {
 	struct semaphore sema; 
 	struct list_elem elem;
 };
+
+tid_t process_create_initd (const char *file_name);
+tid_t process_fork (const char *name, struct intr_frame *if_);
+int process_exec (void *f_name);
+int process_wait (tid_t);
+void process_exit (void);
+void process_activate (struct thread *next);
 
 #endif /* userprog/process.h */

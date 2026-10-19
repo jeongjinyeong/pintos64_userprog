@@ -55,6 +55,7 @@ process_create_initd (const char *file_name) {
 	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
+	
 	return tid;
 }
 
@@ -382,7 +383,11 @@ load (const char *file_name, struct intr_frame *if_) {
 	off_t file_ofs;
 	bool success = false;
 	int i;
-	char *str_file_name = NULL;
+	/*Argument Passing 변수 (종민)*/
+	char *argv[128];
+	char *save_ptr;
+	int argc = 0;
+	char *token;
 
 	/* Allocate and activate page directory. */
 	t->pml4 = pml4_create ();
@@ -390,39 +395,22 @@ load (const char *file_name, struct intr_frame *if_) {
 		goto done;
 	process_activate (thread_current ());
 
-	/* TODO: Your code goes here.
-	 * TODO: Implement argument passing (see project2/argument_passing.html). */
-	int argc = 0;
-	int len_arg[128];
-	int total_len = 0;
-	int after_align_len = 0;
-	int word_align = 0;
+	/*문자열 복제*/
+	size_t size = strlen (file_name) + 1;
+	char *copy = malloc (size);
 
-	char *argv[128];
-	char *token;
-	char *save_ptr;
-	
-	str_file_name = malloc((strlen(file_name) + 1));
-	if (str_file_name == NULL)
+	if (copy == NULL)
 		goto done;
 
-	strlcpy(str_file_name, file_name, strlen(file_name) + 1);
-		
-	for (token = strtok_r (str_file_name, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr)) {
-    	if (argc >= 128)
-        	goto done;		
+	/*문자열 파싱*/
+	strlcpy (copy, file_name, size);
+	for (token = strtok_r (copy, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr))
+		argv[argc++] = token;
 
-		argv[argc] = token; 		
-		len_arg[argc] = strlen(token) + 1;					
-		total_len += len_arg[argc++];		
-	}
+	/* 출력용 파일 이름 복사 */
+	strlcpy (t->file_name, argv[0], strlen(argv[0]) + 1);
 
-	/* Open executable file. */	
-	if (argc == 0)
-		goto done;
-	
-	strlcpy(t->name, argv[0], strlen(argv[0]) + 1);
-
+	/* Open executable file. */
 	file = filesys_open (argv[0]);
 	if (file == NULL) {
 		printf ("load: %s: open failed\n", argv[0]);
@@ -497,44 +485,46 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* Set up stack. */
 	if (!setup_stack (if_))
 		goto done;
-
-	/* align 계산 */
-	after_align_len = (total_len & 0x7) == 0? total_len : (total_len & ~0x7) + 8;
-	word_align = after_align_len - total_len;
-
-	if_->rsp -= after_align_len;	
-	if_->rsp -= sizeof(char*);	
-
-	char *cur_data_ptr = (char *)if_->rsp + (sizeof(char*) + word_align);
-	char *cur_addr_ptr = (char *)if_->rsp - sizeof(char*) * argc;
-
-	/* 반복문 시작 전에 배열 시작 주소 보관. */
-	char **user_argv = (char **)cur_addr_ptr;
-
-	for (int i = 0; i < argc; i++) {		
-		char * ptr = (char*) memcpy (cur_data_ptr, argv[i], len_arg[i]);		
-		memcpy (cur_addr_ptr, &ptr, sizeof(char*));
-		
-		cur_data_ptr += len_arg[i];
-		cur_addr_ptr += sizeof(char*);
-	}		
-	// *((char *)cur_addr_ptr + sizeof(char*)) = NULL;
-	*(char **)cur_addr_ptr = NULL;		
 	
-	if_->R.rdi = argc;
-	if_->R.rsi = (uintptr_t)user_argv;
-
-	// if_->rsp -= sizeof(char*);	
-	if_->rsp = (uintptr_t)user_argv - sizeof(uintptr_t);
-	*(uintptr_t *)(if_->rsp) = 0;
-
 	/* Start address. */
-	if_->rip = ehdr.e_entry;		
+	if_->rip = ehdr.e_entry;
+
+	/*인자를 사용자 스택에 복사*/
+	for (int i = argc - 1; i >= 0; i--) {
+		size_t len = strlen (argv[i]) + 1;
+
+		if_->rsp -= len;
+		memcpy ((void *) if_->rsp, argv[i], len);
+		argv[i] = (char *) if_->rsp;
+	}
+
+	/* padding */
+	if_->rsp &= ~((uintptr_t) 0x7);
+
+	/* 문자열 주소 배열 종료 */
+	if_->rsp -= sizeof(char *);
+	*(char **) if_->rsp = NULL;
+
+	/*main이 사용할 복사한 문자열의 주소를 사용자 스택에 입력*/
+	for (int j = argc - 1; j >= 0; j--) {
+		if_->rsp -= sizeof(char *);
+		*(char **)if_->rsp = argv[j];
+	}
+
+	if_->R.rdi = argc;
+	if_->R.rsi = if_->rsp;
+
+	/* 가짜 반환 함수 */
+	if_->rsp -= sizeof (uintptr_t);
+	*(uintptr_t *) if_->rsp = 0;
+
+	free (copy);
+
 	success = true;
 
 done:
 	/* We arrive here whether the load is successful or not. */
-	free(str_file_name);
+
 	file_close (file);
 	return success;
 }

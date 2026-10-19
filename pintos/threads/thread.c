@@ -312,6 +312,7 @@ thread_create (const char *name, int priority,
 	}	
 
 	t->ss->tid = tid;	
+	t->ss->exit_status = -1;
 	t->ss->ref_cnt = 2;	
 	sema_init(&t->ss->sema, 0);
 	
@@ -531,7 +532,7 @@ kernel_thread (thread_func *function, void *aux) {
    NAME. */
 static void
 init_thread (struct thread *t, const char *name, int priority) {
-	ASSERT (t != NULL);
+	ASSERT (t != NULL); 
 	ASSERT (PRI_MIN <= priority && priority <= PRI_MAX);
 	ASSERT (name != NULL);
 
@@ -544,6 +545,9 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->deadline = 0;
 	t->magic = THREAD_MAGIC;
 	list_init(&t->donors);
+	/* shared status list 초기화 */
+	list_init (&t->children);
+	t->ss = NULL;
 	t->lock = NULL;
 	list_init(&t->children);
 	t->ss = NULL;

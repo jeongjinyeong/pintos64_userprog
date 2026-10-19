@@ -12,7 +12,10 @@
                 "${workspaceFolder}/pintos/tests/threads",
                 "${workspaceFolder}/pintos/include/lib/user"
             ],
-            "defines": ["USERPROG"],
+            "defines": [
+            "USERPROG",
+            "FILESYS"
+            ],
             "compilerPath": "/usr/bin/gcc",
             "compilerArgs": [
                 "-nostdinc"

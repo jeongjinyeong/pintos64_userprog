@@ -100,9 +100,9 @@ struct thread {
 	struct list donors;
 	struct lock *lock;
 
-	/* Shared between thread.c and process.c */
-	struct list children;
 	struct shared_status *ss;
+	struct list children;
+
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
