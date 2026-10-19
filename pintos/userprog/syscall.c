@@ -3,6 +3,7 @@
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "userprog/process.h"
 #include "threads/loader.h"
 #include "userprog/gdt.h"
 #include "userprog/process.h"
@@ -42,17 +43,44 @@ syscall_init (void) {
 void
 syscall_handler (struct intr_frame *f UNUSED) {
 	// TODO: Your implementation goes here.
+
 	switch (f->R.rax) {
-		case SYS_WRITE:
-		if (f->R.rdi == 1)
-			putbuf((char *)f->R.rsi, f->R.rdx);
-		break;
+		case SYS_HALT:
+			break;    
 		case SYS_EXIT:
 			thread_current()->ss->exit_status = f->R.rdi;
+			printf ("%s: exit(%d)\n", thread_current()->file_name, f->R.rdi);
 			thread_exit();
+			break;    
+		case SYS_FORK:
+			break;    
+		case SYS_EXEC:
+			break;    
+		case SYS_WAIT:
+			f->R.rax = process_wait(f->R.rdi);
+			break;    
+		case SYS_CREATE:
+			break;  
+		case SYS_REMOVE:
+			break;  
+		case SYS_OPEN:
+			break;    
+		case SYS_FILESIZE:
+			break;
+		case SYS_READ:
+			break;    
+		case SYS_WRITE:
+			if (f->R.rdi == STDOUT_FILENO)
+				putbuf(f->R.rsi, f->R.rdx);
+				f->R.rax = f->R.rdx; // 시스템 콜의 반환값을 받고 유저 모드에게 전달
+			break;   
+		case SYS_SEEK:
+			break;    
+		case SYS_TELL:
+			break;    
+		case SYS_CLOSE:
+			break;   
 		default:
-		break;
+			break;
 	}
-
-	// thread_exit ();
 }

@@ -536,6 +536,9 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->deadline = 0;
 	t->magic = THREAD_MAGIC;
 	list_init(&t->donors);
+	/* shared status list 초기화 */
+	list_init (&t->children);
+	t->ss = NULL;
 	t->lock = NULL;
 	list_init(&t->children);
 	t->ss = NULL;
