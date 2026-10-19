@@ -297,17 +297,26 @@ thread_create (const char *name, int priority,
 	t->tf.cs = SEL_KCSEG;
 	t->tf.eflags = FLAG_IF;
 
-	t->ss = malloc(sizeof(struct shared_status));
-	if(t->ss==NULL){
+	/* Initialize shared_status */
+	if (function == idle) {
+		thread_unblock (t);
+		yield_priority_handler(t);
+		
+		return tid;
+	}
+		
+	t->ss = malloc(sizeof(struct shared_status));	
+	if (t->ss == NULL) {
 		palloc_free_page(t);
 		return TID_ERROR;
-	}
-	t->ss->tid = tid;
+	}	
+
+	t->ss->tid = tid;	
 	t->ss->exit_status = -1;
-	t->ss->ref_cnt = 2;
+	t->ss->ref_cnt = 2;	
 	sema_init(&t->ss->sema, 0);
-	list_push_back (&thread_current()->children, &t->ss->elem);
 	
+	list_push_back(&thread_current()->children, &t->ss->elem);	
 
 	/* Add to run queue. */
 	thread_unblock (t);

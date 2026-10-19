@@ -9,6 +9,8 @@
 #include "userprog/process.h"
 #include "threads/flags.h"
 #include "intrinsic.h"
+#include "lib/user/syscall.h"
+#include "userprog/process.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
