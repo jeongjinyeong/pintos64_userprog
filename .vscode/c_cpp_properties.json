@@ -9,9 +9,13 @@
                 "${workspaceFolder}/pintos/include",
                 "${workspaceFolder}/pintos/include/lib/kernel",
                 "${workspaceFolder}/pintos/lib/kernel",
-                "${workspaceFolder}/pintos/tests/threads"
+                "${workspaceFolder}/pintos/tests/threads",
+                "${workspaceFolder}/pintos/include/lib/user"
             ],
-            "defines": [],
+            "defines": [
+            "USERPROG",
+            "FILESYS"
+            ],
             "compilerPath": "/usr/bin/gcc",
             "compilerArgs": [
                 "-nostdinc"

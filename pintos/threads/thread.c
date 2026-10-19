@@ -297,13 +297,27 @@ thread_create (const char *name, int priority,
 	t->tf.cs = SEL_KCSEG;
 	t->tf.eflags = FLAG_IF;
 
-	struct thread *curr = thread_current ();
-	t->ss = malloc (sizeof(struct shared_status));
-	sema_init (&t->ss->sema, 0);
-	t->ss->tid = tid;
-	t->ss->ref_cnt = 2;
-	t->exit_status = -1;
-	list_push_back (&curr->children, &t->ss->elem);
+	/* Initialize shared_status */
+	if (function == idle) {
+		thread_unblock (t);
+		yield_priority_handler(t);
+		
+		return tid;
+	}
+		
+	t->ss = malloc(sizeof(struct shared_status));	
+	if (t->ss == NULL) {
+		palloc_free_page(t);
+		return TID_ERROR;
+	}	
+
+	t->ss->tid = tid;	
+	t->ss->exit_status = -1;
+	t->ss->ref_cnt = 2;	
+	sema_init(&t->ss->sema, 0);
+	
+	list_push_back(&thread_current()->children, &t->ss->elem);	
+
 	/* Add to run queue. */
 	thread_unblock (t);
 
@@ -518,7 +532,7 @@ kernel_thread (thread_func *function, void *aux) {
    NAME. */
 static void
 init_thread (struct thread *t, const char *name, int priority) {
-	ASSERT (t != NULL);
+	ASSERT (t != NULL); 
 	ASSERT (PRI_MIN <= priority && priority <= PRI_MAX);
 	ASSERT (name != NULL);
 
@@ -531,11 +545,10 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->deadline = 0;
 	t->magic = THREAD_MAGIC;
 	list_init(&t->donors);
-	t->lock = NULL;
+	/* shared status list 초기화 */
 	list_init (&t->children);
 	t->ss = NULL;
-	t->is_user_process = false;
-	// sema_init (&t->ss->sema, 1);
+	t->lock = NULL;
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should

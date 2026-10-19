@@ -18,6 +18,7 @@
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
+#include "threads/malloc.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -54,6 +55,7 @@ process_create_initd (const char *file_name) {
 	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
+	
 	return tid;
 }
 
@@ -205,31 +207,27 @@ process_exec (void *f_name) {
  * does nothing. */
 int
 process_wait (tid_t child_tid UNUSED) {
-	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
-	 * XXX:       to add infinite loop here before
-	 * XXX:       implementing the process_wait. */
-	// for (int i = 0; i < 1000; i++) { thread_yield(); }
-	struct thread *curr = thread_current();
-	if (list_empty(&curr->children))
-		return -1;
-	else {
-		for (struct list_elem *e = list_front (&curr->children); e != list_tail (&curr->children); e = list_next (e)) {
-			tid_t tid = list_entry (e, struct shared_status, elem)->tid;
-			/* children 리스트에 tid 있음. */
-			if (tid == child_tid) {
-				struct shared_status *ss = (list_entry (e, struct shared_status, elem));
-				sema_down (&ss->sema);
-				/* child 프로세스가 exit했음 */
-				list_remove (e);
-				int status = ss->exit_status; /* status 반환용 저장변수. */
-				enum intr_level old_intr = intr_disable ();
-				
-				if (--ss->ref_cnt == 0)
-					free (ss);
+	struct thread *curr = thread_current ();
+	struct list_elem *e;	
+	struct list *c_list = &curr->children;	
 
-				intr_set_level (old_intr);
-				return status;
-			}
+	for (e = list_begin (c_list); e != list_end (c_list); e = list_next (e)) {
+		struct shared_status *ss = list_entry(e, struct shared_status, elem);
+
+		if (ss->tid == child_tid) {
+			sema_down(&ss->sema);
+			list_remove(e);
+
+			int status = ss->exit_status;
+
+			enum intr_level old_level = intr_disable();
+
+			ss->ref_cnt--;								
+			if (ss->ref_cnt == 0)
+				free(ss);
+
+			intr_set_level(old_level);
+			return status;
 		}
 	}
 	return -1;
@@ -238,47 +236,46 @@ process_wait (tid_t child_tid UNUSED) {
 /* Exit the process. This function is called by thread_exit (). */
 void
 process_exit (void) {
-	struct thread *curr = thread_current ();
-	/* TODO: Your code goes here.
-	 * TODO: Implement process termination message (see
-	 * TODO: project2/process_termination.html).
-	 * TODO: We recommend you to implement process resource cleanup here. */
+	struct thread *curr = thread_current ();				
+	struct shared_status *self_ss;			
 
-		/* 자식 프로세스가 먼저 exit */
-		/* curr을 생성한 부모 프로세스가 있다 */
-	if (curr->is_user_process)
-		printf ("%s: exit(%d)\n", curr->fn, curr->exit_status);
+	if (curr == NULL) 
+		return;	
 
-	if (curr->ss != NULL) { 				
-		enum intr_level old_intr = intr_disable();
-		if (--curr->ss->ref_cnt == 0)
-			free (curr->ss);
-		else {
-			curr->ss->exit_status = curr->exit_status;
-			sema_up (&curr->ss->sema);
-		}
-		intr_set_level (old_intr);
-	}
-		/* if - else if가 아닌 이유는, curr 스레드는 자식이면서 부모일 수 있기 때문. - HJM */
-		/* 부모 프로세스가 먼저 exit */
+	uint64_t *pml4 = curr->pml4;
+	struct list *c_list = &curr->children;						
 
-	if (!list_empty(&curr->children)) {
-		enum intr_level old_intr = intr_disable();
-		/* 자식의 ref_cnt를 1 빼서 부모가 exit했다는 걸 알림. */
-		while (!list_empty(&curr->children)) {
-			struct list_elem *e = list_pop_front (&curr->children);
-			struct shared_status *ss = list_entry (e, struct shared_status, elem);
-			if (--ss->ref_cnt == 0)
-			free (ss);
-		}
-		intr_set_level (old_intr);
+	while (!list_empty(c_list)) {
+		enum intr_level old_level = intr_disable();
+
+		struct list_elem *e = list_pop_front(c_list);
+		struct shared_status *child_ss = list_entry(e, struct shared_status, elem);
+				
+		child_ss->ref_cnt--;							
+		if (child_ss->ref_cnt == 0) 
+			free(child_ss);		
+
+		intr_set_level(old_level);
 	}
 	
-	if (curr->fn != NULL) 
-		free (curr->fn);
-	
-cleanup:	
+	self_ss = curr->ss;
 	process_cleanup ();
+
+	if (self_ss == NULL) 	
+		return;	
+		
+	enum intr_level old_level = intr_disable();	
+
+	if (pml4 != NULL)
+		printf ("%s: exit(%d)\n", curr->name, self_ss->exit_status);
+
+	sema_up(&self_ss->sema);	
+
+	self_ss->ref_cnt--;		
+	if (self_ss->ref_cnt == 0)
+		free(self_ss);			
+
+	intr_set_level(old_level);			
 }
 
 /* Free the current process's resources. */
@@ -390,6 +387,11 @@ load (const char *file_name, struct intr_frame *if_) {
 	off_t file_ofs;
 	bool success = false;
 	int i;
+	/*Argument Passing 변수 (종민)*/
+	char *argv[128];
+	char *save_ptr;
+	int argc = 0;
+	char *token;
 
 	/* Allocate and activate page directory. */
 	t->pml4 = pml4_create ();
@@ -397,22 +399,25 @@ load (const char *file_name, struct intr_frame *if_) {
 		goto done;
 	process_activate (thread_current ());
 
-	/* parsing */
-	char *argv[128];
-	int argc = 0;
-	char *save_ptr;
-	char *fn_copy = malloc (strlen (file_name) + 1);
-	strlcpy (fn_copy, file_name, strlen (file_name) + 1);
-	for (char *token = strtok_r (fn_copy, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr)) 
+	/*문자열 복제*/
+	size_t size = strlen (file_name) + 1;
+	char *copy = malloc (size);
+
+	if (copy == NULL)
+		goto done;
+
+	/*문자열 파싱*/
+	strlcpy (copy, file_name, size);
+	for (token = strtok_r (copy, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr))
 		argv[argc++] = token;
-	
-	t->fn = malloc (strlen(argv[0]) + 1);
-	strlcpy (t->fn, argv[0], strlen(argv[0]) + 1);
+
+	/* 출력용 파일 이름 복사 */
+	strlcpy (t->file_name, argv[0], strlen(argv[0]) + 1);
 
 	/* Open executable file. */
 	file = filesys_open (argv[0]);
 	if (file == NULL) {
-		printf ("load: %s: open failed\n", file_name);
+		printf ("load: %s: open failed\n", argv[0]);
 		goto done;
 	}
 
@@ -424,7 +429,7 @@ load (const char *file_name, struct intr_frame *if_) {
 			|| ehdr.e_version != 1
 			|| ehdr.e_phentsize != sizeof (struct Phdr)
 			|| ehdr.e_phnum > 1024) {
-		printf ("load: %s: error loading executable\n", file_name);
+		printf ("load: %s: error loading executable\n", argv[0]);
 		goto done;
 	}
 
@@ -484,39 +489,48 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* Set up stack. */
 	if (!setup_stack (if_))
 		goto done;
-
+	
 	/* Start address. */
 	if_->rip = ehdr.e_entry;
 
-	/* TODO: Your code goes here.
-	 * TODO: Implement argument passing (see project2/argument_passing.html). */ 
-
+	/*인자를 사용자 스택에 복사*/
 	for (int i = argc - 1; i >= 0; i--) {
-		if_->rsp -= strlen (argv[i]) + 1;
-		memcpy ((void *)if_->rsp, argv[i], strlen (argv[i]));
-		argv[i] = (char *)if_->rsp;
+		size_t len = strlen (argv[i]) + 1;
+
+		if_->rsp -= len;
+		memcpy ((void *) if_->rsp, argv[i], len);
+		argv[i] = (char *) if_->rsp;
 	}
-	if_->rsp = (uintptr_t)if_->rsp & (uintptr_t)(~0x7);
 
-	if_->rsp -= sizeof (char *);
-	*(char **)if_->rsp = NULL;
-	
-	for (int i = argc - 1; i >= 0; i--) {
-		if_->rsp -= sizeof (char *);
-		*(char **)if_->rsp = argv[i];
-	}	
+	/* padding */
+	if_->rsp &= ~((uintptr_t) 0x7);
+
+	/* 문자열 주소 배열 종료 */
+	if_->rsp -= sizeof(char *);
+	*(char **) if_->rsp = NULL;
+
+	/*main이 사용할 복사한 문자열의 주소를 사용자 스택에 입력*/
+	for (int j = argc - 1; j >= 0; j--) {
+		if_->rsp -= sizeof(char *);
+		*(char **)if_->rsp = argv[j];
+	}
 
 	if_->R.rdi = argc;
 	if_->R.rsi = if_->rsp;
 
+	/* 가짜 반환 함수 */
 	if_->rsp -= sizeof (uintptr_t);
-	*(uintptr_t *)if_->rsp = 0;
+	*(uintptr_t *) if_->rsp = 0;
+
+	free (copy);
+
+	
 	success = true;
 
 done:
 	/* We arrive here whether the load is successful or not. */
+
 	file_close (file);
-	free (fn_copy);
 	return success;
 }
 

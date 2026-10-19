@@ -7,7 +7,6 @@
 #include "userprog/gdt.h"
 #include "threads/flags.h"
 #include "intrinsic.h"
-// #include "threads/synch.h"
 #include "userprog/process.h"
 
 void syscall_entry (void);
@@ -45,25 +44,20 @@ syscall_handler (struct intr_frame *f UNUSED) {
 	struct thread *curr = thread_current();
 	switch (f->R.rax) {
 		case SYS_HALT :
-			return ;
-
+			break;
 		case SYS_EXIT :
-			curr->exit_status = f->R.rdi; // 임시 출력용.
-			// printf ("%s: exit(%d)\n", curr->fn, curr->exit_status);
-		
+			curr->exit_status = f->R.rdi;		
 			thread_exit ();
 			NOT_REACHED ();
-		
-		case SYS_FORK :
-			
+			break;
+		case SYS_FORK :	
 			process_fork(curr->name, f);
 		case SYS_EXEC :
 			break;
 		case SYS_WAIT :
 			/* 인자는 rdi */
-
 			f->R.rax = process_wait((tid_t)f->R.rdi);
-			return ;
+			break;
 		case SYS_CREATE :
 		case SYS_REMOVE :
 		case SYS_OPEN :
@@ -71,11 +65,11 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		case SYS_READ :
 			break;
 		case SYS_WRITE :
-			if (f->R.rdi != STDOUT_FILENO)
-				return;
-			putbuf ((char *)f->R.rsi, f->R.rdx);
-			f->R.rax = f->R.rdx; // 일단 하래 ㅋㅋ		
-			return;
+			if (f->R.rdi == STDOUT_FILENO) {
+				putbuf ((char *)f->R.rsi, f->R.rdx);
+				f->R.rax = f->R.rdx;	
+			}
+			break;
 		case SYS_SEEK :
 		case SYS_TELL :
 		case SYS_CLOSE :
@@ -91,16 +85,10 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		case SYS_MOUNT :
 		case SYS_UMOUNT :
 			break;
-			
-	
 
 		default :
 			break;
 	}
-	thread_exit();
-	NOT_REACHED();
 
-	// printf ("system call!\n");
-	// thread_exit ();
 }
 
