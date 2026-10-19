@@ -107,7 +107,7 @@ struct thread {
 	struct list children;
 
 	/* file discriptor */
-	struct list file_discriptor;
+	struct list file_list;
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
