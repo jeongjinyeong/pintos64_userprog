@@ -39,4 +39,4 @@ a_thread_func (void *lock_)
     msg ("Thread A acquired lock.");
     lock_release (lock);
     msg ("Thread A finished.");
-}
+}

@@ -65,7 +65,7 @@ initd (void *f_name) {
 #ifdef VM
 	supplemental_page_table_init (&thread_current ()->spt);
 #endif
-
+	thread_current ()->is_user_process = true;
 	process_init ();
 
 	if (process_exec (f_name) < 0)
@@ -127,6 +127,7 @@ __do_fork (void *aux) {
 	struct intr_frame *parent_if;
 	bool succ = true;
 
+	current->is_user_process = true;
 	/* 1. Read the cpu context to local stack. */
 	memcpy (&if_, parent_if, sizeof (struct intr_frame));
 
@@ -180,6 +181,9 @@ process_exec (void *f_name) {
 
 	/* And then load the binary */
 	success = load (file_name, &_if);
+
+	/* 레지스터 값 찍어보는 코드 - HJM */
+	// hex_dump(_if.rsp, _if.rsp, USER_STACK - _if.rsp, true);
 
 	/* If load failed, quit. */
 	palloc_free_page (file_name);
@@ -520,6 +524,7 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	free (copy);
 
+	
 	success = true;
 
 done:

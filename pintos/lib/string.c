@@ -100,6 +100,7 @@ memchr (const void *block_, int ch_, size_t size) {
    null pointer if C does not appear in STRING.  If C == '\0'
    then returns a pointer to the null terminator at the end of
    STRING. */
+/* 문자열 string에서 문자 c가 처음으로 등장한 주소 반환 - HJM */
 char *
 strchr (const char *string, int c_) {
 	char c = c_;
@@ -215,6 +216,12 @@ outputs:
 'to'
 'tokenize.'
 */
+
+/* 문자열 s를 받아, 구분자 delimiters를 기준으로 자른다.
+   자른 문자열 각각의 시작 주소를 반환한다. 
+   구문자가 아닌 문자는 skip한다.
+   s가 nonnull이면 그 위치에서 시작한다.
+   s가 null이면 저장한 포지션에서 시작한다. - HJM */
 char *
 strtok_r (char *s, const char *delimiters, char **save_ptr) {
 	char *token;

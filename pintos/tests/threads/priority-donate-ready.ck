@@ -13,4 +13,4 @@ check_expected ([<<'EOF']);
 (priority-donate-ready) Thread C finished.
 (priority-donate-ready) end
 EOF
-pass;
+pass;

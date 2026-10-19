@@ -11,4 +11,4 @@ check_expected ([<<'EOF']);
 (priority-donate-raise) Thread A finished.
 (priority-donate-raise) end
 EOF
-pass;
+pass;

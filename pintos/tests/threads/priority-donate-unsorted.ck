@@ -11,4 +11,4 @@ check_expected ([<<'EOF']);
 (priority-donate-unsorted) T_mid acquired lock_a.
 (priority-donate-unsorted) end
 EOF
-pass;
+pass;
