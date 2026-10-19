@@ -7,6 +7,8 @@
 #include "userprog/gdt.h"
 #include "threads/flags.h"
 #include "intrinsic.h"
+#include "lib/user/syscall.h"
+#include "userprog/process.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -44,23 +46,37 @@ syscall_handler (struct intr_frame *f UNUSED) {
 	uint64_t sys_call_num = (f->R.rax);	
 
 	/* syscall parsing _ljw */
-	switch (sys_call_num) {			
+	switch (sys_call_num) {		
+
+		case SYS_EXIT:			
+			struct thread *curr = thread_current();								
+			curr->ss->exit_status = f->R.rdi;
+			f->R.rax = curr->ss->exit_status; 			
+
+			thread_exit();							
+			break;
+		
+		case SYS_WAIT: 
+			pid_t pid = f->R.rdi;
+			int status = process_wait (pid);
+			
+			f->R.rax = status;
+			break;
+
 		case SYS_WRITE:	
 			int fd = f->R.rdi;
 			char *buf = f->R.rsi;
-			int size = f->R.rdx;
-
-			/* fd가 왜 필요한가? 1번이면 콘솔에 쓴다는 것은 알겠는데 */
+			unsigned size = f->R.rdx;
+			
 			if (fd == STDOUT_FILENO) {
 				putbuf(buf, size);
 				f->R.rax = size;
 			}
-		break;
+			else 
+				f->R.rax = 0;			
+			break;
 
 		default :
-
-		break;
-	}
-
-	// thread_exit ();
+			break;
+	}	
 }

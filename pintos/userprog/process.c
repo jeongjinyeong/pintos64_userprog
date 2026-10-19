@@ -202,27 +202,75 @@ process_exec (void *f_name) {
  * does nothing. */
 int
 process_wait (tid_t child_tid UNUSED) {
-	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
-	 * XXX:       to add infinite loop here before
-	 * XXX:       implementing the process_wait. */
-	
-	while (true) {		
-		thread_yield();
-	}
+	struct thread *curr = thread_current ();
+	struct list_elem *e;	
+	struct list *c_list = &curr->children;	
 
+	for (e = list_begin (c_list); e != list_end (c_list); e = list_next (e)) {
+		struct shared_status *ss = list_entry(e, struct shared_status, elem);
+
+		if (ss->tid == child_tid) {
+			sema_down(&ss->sema);
+			list_remove(e);
+
+			int status = ss->exit_status;
+
+			enum intr_level old_level = intr_disable();
+
+			ss->ref_cnt--;								
+			if (ss->ref_cnt == 0)
+				free(ss);
+
+			intr_set_level(old_level);
+			return status;
+		}
+	}
 	return -1;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
 void
 process_exit (void) {
-	struct thread *curr = thread_current ();
-	/* TODO: Your code goes here.
-	 * TODO: Implement process termination message (see
-	 * TODO: project2/process_termination.html).
-	 * TODO: We recommend you to implement process resource cleanup here. */
+	struct thread *curr = thread_current ();				
+	struct shared_status *self_ss;			
 
+	if (curr == NULL) 
+		return;	
+
+	uint64_t *pml4 = curr->pml4;
+	struct list *c_list = &curr->children;						
+
+	while (!list_empty(c_list)) {
+		enum intr_level old_level = intr_disable();
+
+		struct list_elem *e = list_pop_front(c_list);
+		struct shared_status *child_ss = list_entry(e, struct shared_status, elem);
+				
+		child_ss->ref_cnt--;							
+		if (child_ss->ref_cnt == 0) 
+			free(child_ss);		
+
+		intr_set_level(old_level);
+	}
+	
+	self_ss = curr->ss;
 	process_cleanup ();
+
+	if (self_ss == NULL) 	
+		return;	
+		
+	enum intr_level old_level = intr_disable();	
+
+	if (pml4 != NULL)
+		printf ("%s: exit(%d)\n", curr->name, self_ss->exit_status);
+
+	sema_up(&self_ss->sema);	
+
+	self_ss->ref_cnt--;		
+	if (self_ss->ref_cnt == 0)
+		free(self_ss);			
+
+	intr_set_level(old_level);			
 }
 
 /* Free the current process's resources. */
@@ -359,10 +407,7 @@ load (const char *file_name, struct intr_frame *if_) {
 		goto done;
 
 	strlcpy(str_file_name, file_name, strlen(file_name) + 1);
-	
-	/* 1. 문자열을 잘라서 각 단위로 크기를 구하고
-	   2. 스택 포인터에서 역산해서 주소를 구한 다음
-	   3. 그 주소에 실제로 그 데이터를 저장. */	
+		
 	for (token = strtok_r (str_file_name, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr)) {
     	if (argc >= 128)
         	goto done;		
@@ -372,14 +417,12 @@ load (const char *file_name, struct intr_frame *if_) {
 		total_len += len_arg[argc++];		
 	}
 
-	// memcpy (cur_addr_ptr + sizeof(char*), 0, sizeof(char*));
-	// memcpy (if_->rsp, 0, sizeof(char*));
-
-	/* Open executable file. */
-	// file = filesys_open (file_name); comment out _ljw
+	/* Open executable file. */	
 	if (argc == 0)
 		goto done;
 	
+	strlcpy(t->name, argv[0], strlen(argv[0]) + 1);
+
 	file = filesys_open (argv[0]);
 	if (file == NULL) {
 		printf ("load: %s: open failed\n", argv[0]);
