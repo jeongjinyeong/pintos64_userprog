@@ -105,6 +105,7 @@ struct thread {
 
 	struct shared_status *ss;
 	struct list children;
+	struct list fd_table;
 
 
 #ifdef USERPROG
