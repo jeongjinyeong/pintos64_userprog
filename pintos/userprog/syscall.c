@@ -45,10 +45,13 @@ syscall_handler (struct intr_frame *f UNUSED) {
 
 	switch (f->R.rax) {
 		case SYS_HALT:
+			power_off();
 			break;    
 		case SYS_EXIT:
+			/* 출력용 */
 			thread_current()->ss->exit_status = f->R.rdi;
 			printf ("%s: exit(%d)\n", thread_current()->file_name, f->R.rdi);
+			/* 스레드 exit*/
 			thread_exit();
 			break;    
 		case SYS_FORK:
@@ -59,6 +62,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			f->R.rax = process_wait(f->R.rdi);
 			break;    
 		case SYS_CREATE:
+			f->R.rax = filesys_create(f->R.rdi, f->R.rsi);
 			break;  
 		case SYS_REMOVE:
 			break;  

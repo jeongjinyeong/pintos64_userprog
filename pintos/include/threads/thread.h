@@ -105,6 +105,9 @@ struct thread {
 	struct shared_status *ss;
 	char file_name[128];
 
+	/* file discriptor */
+	struct list file_discriptor;
+
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4;                     /* Page map level 4 */
