@@ -53,6 +53,12 @@ process_create_initd (const char *file_name) {
 
 	/* Create a new thread to execute FILE_NAME. */
 	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
+
+	char *save_ptr;
+	char *token = strtok_r (fn_copy, " ", &save_ptr);
+	/* 출력용 파일 이름 복사 */
+	strlcpy (&thread_current()->name, token, strlen(token) + 1);
+
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
 	
@@ -229,7 +235,7 @@ process_exec (void *f_name) {
 
 	/* If load failed, quit. */
 	palloc_free_page (file_name);
-	if (!success)
+	if (!success) 
 		return -1;
 
 	/* Start switched process. */
@@ -452,9 +458,6 @@ load (const char *file_name, struct intr_frame *if_) {
 	strlcpy (copy, file_name, size);
 	for (token = strtok_r (copy, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr))
 		argv[argc++] = token;
-
-	/* 출력용 파일 이름 복사 */
-	strlcpy (&t->name, argv[0], strlen(argv[0]) + 1);
 
 	/* Open executable file. */
 	file = filesys_open (argv[0]);

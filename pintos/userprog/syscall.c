@@ -8,6 +8,8 @@
 #include "threads/flags.h"
 #include "intrinsic.h"
 #include "userprog/process.h"
+#include "threads/palloc.h"
+#include <string.h>
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -52,9 +54,17 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			NOT_REACHED ();
 			break;
 		case SYS_FORK :	
-			f->R.rax = process_fork(f->R.rdi, f);
+			f->R.rax = process_fork (f->R.rdi, f);
 			break;
 		case SYS_EXEC :
+			/* 기존 문자열 저장 및 새 페이지 할당*/
+			char *fn_copy;
+			fn_copy = palloc_get_page (0);
+			if (fn_copy == NULL)
+				return TID_ERROR;
+
+			strlcpy (fn_copy, (char *)f->R.rdi, PGSIZE);
+			f->R.rax = process_exec (fn_copy);
 			break;
 		case SYS_WAIT :
 			/* 인자는 rdi */
