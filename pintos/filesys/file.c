@@ -183,7 +183,7 @@ find_file_discriptor (int fd) {
 	struct list_elem *e;
 	struct list *fd_table = &thread_current ()->fd_table;
 	
-	for (e = list_begin (fd_table); e != list_end (fd_table); e = list_next (fd_table)) {
+	for (e = list_begin (fd_table); e != list_end (fd_table); e = list_next (e)) {
 		struct fd_entry *fd_e = list_entry (e, struct fd_entry, elem);
 
 		if (fd_e->fd == fd) 
@@ -198,7 +198,7 @@ count_open_file (int fd) {
 	struct list *fd_table = &thread_current ()->fd_table;
 	int open_cnt = 0;
 	
-	for (e = list_begin (fd_table); e != list_end (fd_table); e = list_next (fd_table)) {
+	for (e = list_begin (fd_table); e != list_end (fd_table); e = list_next (e)) {
 		struct fd_entry *fd_e = list_entry (e, struct fd_entry, elem);
 
 		if (fd_e->fd == fd) 

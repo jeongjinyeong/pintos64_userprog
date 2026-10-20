@@ -90,13 +90,13 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		case SYS_EXEC :
 			/* 기존 문자열 저장 및 새 페이지 할당*/
 			char *fn_copy;
-			fn_copy = palloc_get_page (0);
+			fn_copy = (char *) palloc_get_page (0);
 			if (!fn_copy)
 				goto fail;
 
 			strlcpy (fn_copy, (char *)f->R.rdi, PGSIZE);
 			if (process_exec (fn_copy) == -1) {
-				curr->ss->exit_status == -1;
+				curr->ss->exit_status = -1;
 				thread_exit();
 			}
 			break;

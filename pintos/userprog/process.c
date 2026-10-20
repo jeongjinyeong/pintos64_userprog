@@ -200,7 +200,7 @@ __do_fork (void *aux) {
 	 * TODO:       the resources of parent.*/
 	struct list_elem *e;
 	struct list *fd_table = &parent->fd_table;
-	for (e = list_begin (fd_table); e != list_end (fd_table); e = list_next (fd_table)) {
+	for (e = list_begin (fd_table); e != list_end (fd_table); e = list_next (e)) {
 		struct fd_entry *fd_e = list_entry (e, struct fd_entry, elem);
 		struct fd_entry *copy = malloc (sizeof (struct fd_entry));
 		if (!copy)
