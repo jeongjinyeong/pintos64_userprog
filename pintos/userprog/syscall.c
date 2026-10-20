@@ -16,6 +16,8 @@
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
 
+struct lock filesys_lock;
+
 /* System call.
  *
  * Previously system call services was handled by the interrupt handler
@@ -35,6 +37,8 @@ syscall_init (void) {
 			((uint64_t)SEL_KCSEG) << 32);
 	write_msr(MSR_LSTAR, (uint64_t) syscall_entry);
 
+	lock_init (&filesys_lock);
+
 	/* The interrupt service rountine should not serve any interrupts
 	 * until the syscall_entry swaps the userland stack to the kernel
 	 * mode stack. Therefore, we masked the FLAG_FL. */
@@ -42,10 +46,35 @@ syscall_init (void) {
 			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
 }
 
+bool
+is_valid (struct intr_frame *f UNUSED) {
+
+	if (f->R.rdi >= KERN_BASE)
+	switch (f->R.rax) {
+		case SYS_OPEN :
+			break;
+		case SYS_EXEC :
+			break;
+		case SYS_READ :
+			break;
+		case SYS_WRITE :
+			break;
+		case SYS_CREATE :
+			break;
+		default:
+			break;
+	}
+}
+
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
 	struct thread *curr = thread_current();
+	struct fd_entry *fd_e = NULL;
+	int fd = 0;
+	char *file_name;
+	struct file *file;
+
 	switch (f->R.rax) {
 		case SYS_HALT :
 			power_off();
@@ -62,11 +91,14 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			/* 기존 문자열 저장 및 새 페이지 할당*/
 			char *fn_copy;
 			fn_copy = palloc_get_page (0);
-			if (fn_copy == NULL)
-				return TID_ERROR;
+			if (!fn_copy)
+				goto fail;
 
 			strlcpy (fn_copy, (char *)f->R.rdi, PGSIZE);
-			f->R.rax = process_exec (fn_copy);
+			if (process_exec (fn_copy) == -1) {
+				curr->ss->exit_status == -1;
+				thread_exit();
+			}
 			break;
 		case SYS_WAIT :
 			/* 인자는 rdi */
@@ -77,25 +109,59 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			break;
 		case SYS_REMOVE :
 		case SYS_OPEN :
-			struct file *file = filesys_open (f->R.rdi);
+			if (!f->R.rdi)
+				goto fail;
+
+			file = filesys_open (f->R.rdi);
+			if (!file)
+				goto fail;
+
 			f->R.rax = make_fd (file);
 			break;
 		case SYS_FILESIZE :
+			fd_e = find_file_discriptor (f->R.rdi);
+			if (fd_e) 
+				f->R.rax = file_length (fd_e->file);
+			break;
 		case SYS_READ :
+			fd = f->R.rdi;
+			if (fd == 0)
+				fd = input_getc();
+
+			if (fd < 2)
+				goto fail;
+
+			fd_e = find_file_discriptor(fd);
+			if (fd_e) {
+				lock_acquire(&filesys_lock);
+				f->R.rax = file_read (fd_e->file, f->R.rsi, f->R.rdx);
+				lock_release(&filesys_lock);
+			}
+			else	
+				goto fail;
 			break;
 		case SYS_WRITE :
-			if (f->R.rdi == STDOUT_FILENO) {
+			fd = f->R.rdi;
+			if (fd == STDOUT_FILENO) {
 				putbuf ((char *)f->R.rsi, f->R.rdx);
 				f->R.rax = f->R.rdx;	
+			}
+			else if (fd > 1) {
+				fd_e = find_file_discriptor(fd);
+				if (fd_e) {
+					lock_acquire(&filesys_lock);
+					f->R.rax = file_write (fd_e->file, f->R.rsi, f->R.rdx);
+					lock_release(&filesys_lock);
+				}
 			}
 			break;
 		case SYS_SEEK :
 		case SYS_TELL :
 		case SYS_CLOSE :
-			struct fd_entry *fd_e = find_file_discriptor(f->R.rdi);
+			fd_e = find_file_discriptor(f->R.rdi);
 			if (fd_e) {
 				file_close (fd_e->file);
-				list_remove(&fd_e->elem);
+				list_remove (&fd_e->elem);
 				free (fd_e);
 			}
 			break;
@@ -115,6 +181,9 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		default :
 			break;
 	}
+	return;
 
+fail:
+	f->R.rax = -1;
 }
 

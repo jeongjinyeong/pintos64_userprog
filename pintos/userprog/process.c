@@ -203,7 +203,9 @@ __do_fork (void *aux) {
 	for (e = list_begin (fd_table); e != list_end (fd_table); e = list_next (fd_table)) {
 		struct fd_entry *fd_e = list_entry (e, struct fd_entry, elem);
 		struct fd_entry *copy = malloc (sizeof (struct fd_entry));
-
+		if (!copy)
+			break;
+		
 		struct file *f = file_duplicate (fd_e->file);
 		copy->file = f;
 		copy->fd = fd_e->fd;
