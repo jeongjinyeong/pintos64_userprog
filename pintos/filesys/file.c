@@ -2,6 +2,7 @@
 #include <debug.h>
 #include "filesys/inode.h"
 #include "threads/malloc.h"
+#include "threads/thread.h"
 
 /* An open file. */
 struct file {
@@ -158,4 +159,25 @@ off_t
 file_tell (struct file *file) {
 	ASSERT (file != NULL);
 	return file->pos;
+}
+
+/* 파일 구조체 주소를 입력받아서 리스트에서 가장 큰 fd + 1을 반환함.
+	리스트에 push_back함 */
+int
+file_descripter (struct file *file) {
+	struct thread *curr = thread_current ();
+	struct fd_entry *fde = malloc (sizeof(struct fd_entry));
+	if (fde == NULL)
+		return -1;
+
+	fde->file = file;
+	if (list_empty (&curr->fd_table)) 
+		fde->fd = 2;
+	
+	else 
+		fde->fd = list_entry (list_back (&curr->fd_table), struct fd_entry, elem)->fd + 1;
+	
+	list_push_back (&curr->fd_table, &fde->elem);
+
+	return fde->fd;
 }
