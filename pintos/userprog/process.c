@@ -191,6 +191,20 @@ __do_fork (void *aux) {
 	 * TODO:       from the fork() until this function successfully duplicates
 	 * TODO:       the resources of parent.*/
 	intr_set_level (old_level);
+
+	for (struct list_elem *e = list_begin (&parent->fd_table); e != list_end (&parent->fd_table); e = list_next (e)) {
+		struct fd_entry *fde = malloc (sizeof (struct fd_entry));
+		if (fde == NULL)
+			goto error;
+		struct fd_entry *parent_fde = list_entry (e, struct fd_entry, elem);
+		fde->fd = parent_fde->fd;
+		fde->file = file_duplicate (parent_fde->file);
+		if (fde->file == NULL) {
+			free (fde);
+			goto error;
+		}
+		list_push_back (&current->fd_table, &fde->elem);
+	}
 	process_init ();
 
 	/* Finally, switch to the newly created process. */
@@ -201,6 +215,11 @@ __do_fork (void *aux) {
 		do_iret (&if_);
 	}
 error:
+	while (!list_empty (&current->fd_table)) {
+		struct fd_entry *tmp = list_entry (list_pop_front (&current->fd_table), struct fd_entry, elem);
+		file_close (tmp->file);
+		free (tmp);
+	}
 	fs->success = false;
 	sema_up (&fs->sema);
 	thread_exit ();
@@ -229,7 +248,7 @@ process_exec (void *f_name) {
 	/* If load failed, quit. */
 	palloc_free_page (f_name);
 	if (!success) {
-		thread_current()->ss->exit_status = -1;
+		thread_current ()->ss->exit_status = -1;
 		thread_exit ();
 		NOT_REACHED ();
 	}
