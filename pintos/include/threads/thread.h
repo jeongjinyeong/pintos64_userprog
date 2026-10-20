@@ -107,6 +107,8 @@ struct thread {
 	struct list children;
 	struct list fd_table;
 
+	/* file discriptor */
+	struct list fd_table;
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */

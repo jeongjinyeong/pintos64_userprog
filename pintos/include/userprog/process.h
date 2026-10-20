@@ -28,4 +28,6 @@ int process_wait (tid_t);
 void process_exit (void);
 void process_activate (struct thread *next);
 
+char *copy_file_name (const char *file_name);
+
 #endif /* userprog/process.h */

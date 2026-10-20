@@ -16,6 +16,8 @@
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
 
+struct lock filesys_lock;
+
 /* System call.
  *
  * Previously system call services was handled by the interrupt handler
@@ -34,6 +36,8 @@ syscall_init (void) {
 	write_msr(MSR_STAR, ((uint64_t)SEL_UCSEG - 0x10) << 48  |
 			((uint64_t)SEL_KCSEG) << 32);
 	write_msr(MSR_LSTAR, (uint64_t) syscall_entry);
+
+	lock_init (&filesys_lock);
 
 	/* The interrupt service rountine should not serve any interrupts
 	 * until the syscall_entry swaps the userland stack to the kernel
@@ -99,6 +103,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 	struct thread *curr = thread_current ();
 	switch (f->R.rax) {
 		case SYS_HALT :
+			power_off();
 			break;
 		case SYS_EXIT :
 			curr->ss->exit_status = f->R.rdi;		
@@ -218,6 +223,13 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		case SYS_SEEK :
 		case SYS_TELL :
 		case SYS_CLOSE :
+			fd_e = find_file_discriptor(f->R.rdi);
+			if (fd_e) {
+				file_close (fd_e->file);
+				list_remove (&fd_e->elem);
+				free (fd_e);
+			}
+			break;
 		case SYS_DUP2 :
 		case SYS_MMAP :
 		case SYS_MUNMAP :
@@ -234,6 +246,9 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		default :
 			break;
 	}
+	return;
 
+fail:
+	f->R.rax = -1;
 }
 
