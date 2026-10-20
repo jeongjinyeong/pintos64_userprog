@@ -12,9 +12,15 @@
 #include "filesys/file.h"
 #include "filesys/filesys.h"
 #include "devices/input.h"
+#include "threads/palloc.h"
+#include "filesys/file.h"
+#include "filesys/filesys.h"
+#include "devices/input.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
+
+struct lock filesys_lock;
 
 /* System call.
  *
@@ -35,24 +41,34 @@ syscall_init (void) {
 			((uint64_t)SEL_KCSEG) << 32);
 	write_msr(MSR_LSTAR, (uint64_t) syscall_entry);
 
+	lock_init (&filesys_lock);
+
 	/* The interrupt service rountine should not serve any interrupts
 	 * until the syscall_entry swaps the userland stack to the kernel
 	 * mode stack. Therefore, we masked the FLAG_FL. */
 	write_msr(MSR_SYSCALL_MASK,
 			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
 }
-
 bool
 is_valid (struct intr_frame *f UNUSED) {
 	struct thread *curr = thread_current ();
 	switch (f->R.rax) {
-		case SYS_FORK :
 		case SYS_EXEC :
+		case SYS_FORK :
 		case SYS_CREATE :
-		case SYS_OPEN :
-			if (f->R.rdi == NULL || is_kernel_vaddr (f->R.rdi) || !pml4_get_page (curr->pml4, f->R.rdi))
-				return false;
+		case SYS_OPEN : {
+			const char *fn_copy = (const char*)f->R.rdi;
+			while (true) {
+				if (is_user_vaddr (fn_copy) && pml4_get_page (curr->pml4, fn_copy)) {
+					if (*fn_copy == '\0')
+						break;
+					fn_copy++;
+				}
+				else
+					return false;
+			}
 			break;
+		}
 		case SYS_READ :
 		case SYS_WRITE :
 		{
@@ -76,13 +92,13 @@ is_valid (struct intr_frame *f UNUSED) {
 	}
 	return true;
 }
-
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
 	struct thread *curr = thread_current ();
 	switch (f->R.rax) {
 		case SYS_HALT :
+			power_off();
 			break;
 		case SYS_EXIT :
 			curr->ss->exit_status = f->R.rdi;		
@@ -127,6 +143,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			f->R.rax = filesys_create (f->R.rdi, f->R.rsi);
 			break;
 		case SYS_REMOVE :
+			break;
 		case SYS_OPEN :
 		{
 			if (!is_valid (f)) {
@@ -156,48 +173,44 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		}
 		case SYS_FILESIZE :
 			f->R.rax = -1;
-			for (struct list_elem *e = list_begin (&curr->fd_table); e != list_end (&curr->fd_table); e = e->next) {
-				struct fd_entry *fde = list_entry (e, struct fd_entry, elem);
-				if (fde->fd == f->R.rdi) {
-					f->R.rax = file_length (fde->file);
+			if (f->R.rdi == 0 || f->R.rdi == 1)
+				break;
+			for (struct list_elem *e = list_begin (&curr->fd_table); e != list_end (&curr->fd_table); e = list_next (e)){
+				if (f->R.rdi == list_entry (e, struct fd_entry, elem)->fd) {
+					f->R.rax = file_length (list_entry (e, struct fd_entry, elem)->file);
 					break;
 				}
-			}
+			}			
 			break;
 		case SYS_READ :
+		{
 			if (!is_valid (f)) {
 				curr->ss->exit_status = -1;
 				thread_exit ();
 				NOT_REACHED ();
 			}
+
 			if (f->R.rdi == STDIN_FILENO) {
-				for (uint64_t i = 0; i < f->R.rdx; i++)
-					*(char *)(f->R.rsi + i) = input_getc ();
+				char *buffer = (char *)f->R.rsi;
+				for (size_t i = 0; i < f->R.rdx; i++) 
+					buffer[i] = input_getc ();
 				f->R.rax = f->R.rdx;
 				break;
 			}
-			if (f->R.rdi == STDOUT_FILENO) {
-				f->R.rax = -1;
-				break;
-			}
 			f->R.rax = -1;
-			for (struct list_elem *e = list_begin (&curr->fd_table); e != list_end (&curr->fd_table); e = e->next) {
-				struct fd_entry *fde = list_entry (e, struct fd_entry, elem);
-				if (fde->fd == f->R.rdi) {
-					f->R.rax = file_read (fde->file, f->R.rsi, f->R.rdx);
+			for (struct list_elem *e = list_begin (&curr->fd_table); e != list_end (&curr->fd_table); e = list_next (e)){
+				if (f->R.rdi == list_entry (e, struct fd_entry, elem)->fd) {
+					f->R.rax = file_read (list_entry (e, struct fd_entry, elem)->file, (void *)f->R.rsi, f->R.rdx);
 					break;
 				}
 			}
 			break;
+		}
 		case SYS_WRITE :
 			if (!is_valid (f)) {
 				curr->ss->exit_status = -1;
 				thread_exit ();
 				NOT_REACHED ();
-			}
-			if (f->R.rdi == STDIN_FILENO) {
-				f->R.rax = -1;
-				break;
 			}
 			if (f->R.rdi == STDOUT_FILENO) {
 				putbuf ((char *)f->R.rsi, f->R.rdx);
@@ -213,6 +226,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 				}
 			}
 			break;
+		
 		case SYS_SEEK :
 		case SYS_TELL :
 		case SYS_CLOSE :
@@ -242,6 +256,6 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		default :
 			break;
 	}
-
+	return;
 }
 

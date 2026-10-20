@@ -107,6 +107,7 @@ struct thread {
 	struct list children;
 	struct list fd_table;
 
+
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4;                     /* Page map level 4 */

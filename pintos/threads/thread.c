@@ -318,6 +318,7 @@ thread_create (const char *name, int priority,
 	
 	list_push_back(&thread_current()->children, &t->ss->elem);	
 
+	list_init (&t->fd_table);
 	/* Add to run queue. */
 	thread_unblock (t);
 
