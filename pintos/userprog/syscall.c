@@ -223,13 +223,6 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		case SYS_SEEK :
 		case SYS_TELL :
 		case SYS_CLOSE :
-			fd_e = find_file_discriptor(f->R.rdi);
-			if (fd_e) {
-				file_close (fd_e->file);
-				list_remove (&fd_e->elem);
-				free (fd_e);
-			}
-			break;
 		case SYS_DUP2 :
 		case SYS_MMAP :
 		case SYS_MUNMAP :
@@ -247,8 +240,5 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			break;
 	}
 	return;
-
-fail:
-	f->R.rax = -1;
 }
 
