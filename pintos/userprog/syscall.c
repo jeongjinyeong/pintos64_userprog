@@ -200,7 +200,9 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			f->R.rax = -1;
 			for (struct list_elem *e = list_begin (&curr->fd_table); e != list_end (&curr->fd_table); e = list_next (e)){
 				if (f->R.rdi == list_entry (e, struct fd_entry, elem)->fd) {
+					lock_acquire (&filesys_lock);
 					f->R.rax = file_read (list_entry (e, struct fd_entry, elem)->file, (void *)f->R.rsi, f->R.rdx);
+					lock_release (&filesys_lock);
 					break;
 				}
 			}
@@ -221,7 +223,9 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			for (struct list_elem *e = list_begin (&curr->fd_table); e != list_end (&curr->fd_table); e = e->next) {
 				struct fd_entry *fde = list_entry (e, struct fd_entry, elem);
 				if (fde->fd == f->R.rdi) {
+					lock_acquire (&filesys_lock);
 					f->R.rax = file_write (fde->file, f->R.rsi, f->R.rdx);
+					lock_release (&filesys_lock);
 					break;
 				}
 			}
