@@ -6,10 +6,11 @@
 
 struct inode;
 struct fd_entry {
-    struct file *file;
-    int fd;
-    struct list_elem elem;
+  struct file *file;
+  int fd;
+  struct list_elem elem;
 };
+
 /* Opening and closing files. */
 struct file *file_open (struct inode *);
 struct file *file_reopen (struct file *);
@@ -32,5 +33,4 @@ void file_seek (struct file *, off_t);
 off_t file_tell (struct file *);
 off_t file_length (struct file *);
 
-int file_descripter (struct file *file);
 #endif /* filesys/file.h */

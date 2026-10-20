@@ -12,6 +12,10 @@
 #include "filesys/file.h"
 #include "filesys/filesys.h"
 #include "devices/input.h"
+#include "threads/palloc.h"
+#include "filesys/file.h"
+#include "filesys/filesys.h"
+#include "devices/input.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -54,12 +58,11 @@ is_valid (struct intr_frame *f UNUSED) {
 		case SYS_CREATE :
 		case SYS_OPEN : {
 			const char *fn_copy = (const char*)f->R.rdi;
-			while (1) {
+			while (true) {
 				if (is_user_vaddr (fn_copy) && pml4_get_page (curr->pml4, fn_copy)) {
 					if (*fn_copy == '\0')
 						break;
-					else
-						fn_copy++;
+					fn_copy++;
 				}
 				else
 					return false;
@@ -67,33 +70,25 @@ is_valid (struct intr_frame *f UNUSED) {
 			break;
 		}
 		case SYS_READ :
-		case SYS_WRITE : {
-			if (f->R.rdx == 0) {
-				return true;
-			}
-			const char *buffer = (const char*)f->R.rsi;
-
-			if (!is_user_vaddr ((uint64_t) buffer))
+		case SYS_WRITE :
+		{
+			if (f->R.rsi == NULL || is_kernel_vaddr (f->R.rsi))
 				return false;
-			if ((uintptr_t) KERN_BASE - f->R.rsi < f->R.rdx)
+			if ((uint64_t)KERN_BASE - f->R.rsi < f->R.rdx)
 				return false;
-			const char *first_down = pg_round_down (buffer);
-			const char *last_down = pg_round_down (buffer + f->R.rdx - 1);
-			while (1) {
-				if (is_user_vaddr ((char *)first_down) && pml4_get_page (curr->pml4, (char *)first_down)) {
-					if (f->R.rax == SYS_READ) {
-						uint64_t *pte = pml4e_walk (curr->pml4, (uint64_t) first_down, 0);
-						if (!is_writable (pte))
-							return false;
-					}
-					if (first_down == last_down)
-						break;
-					first_down += PGSIZE;
-				}
-				else 
+			uint64_t page_addr = pg_round_down (f->R.rsi);
+			while (page_addr <= pg_round_down (f->R.rsi + f->R.rdx - 1)) {
+				if (!pml4_get_page (curr->pml4, page_addr))
 					return false;
+				if (f->R.rax == SYS_READ) {
+					if (!is_writable (pml4e_walk (curr->pml4, page_addr, 0)))
+						return false;
+				}
+				page_addr += PGSIZE;
 			}
 		}
+		default :
+			break;
 	}
 	return true;
 }
@@ -116,21 +111,26 @@ syscall_handler (struct intr_frame *f UNUSED) {
 				thread_exit ();
 				NOT_REACHED ();
 			}
-			f->R.rax = process_fork ((char *)f->R.rdi, f);
+			f->R.rax = process_fork (f->R.rdi, f);
 			break;
 		case SYS_EXEC :
+		{
 			if (!is_valid (f)) {
 				curr->ss->exit_status = -1;
 				thread_exit ();
 				NOT_REACHED ();
 			}
-			f->R.rax = -1;
-			char *file_name = palloc_get_page (0);
-			if (file_name == NULL)
-				break;
-			strlcpy (file_name, (char *)f->R.rdi, PGSIZE);
+			char *file_name = palloc_get_page (PAL_ZERO);
+			if (file_name == NULL) {
+				curr->ss->exit_status = -1;
+				thread_exit ();
+			}
+			strlcpy (file_name, f->R.rdi, PGSIZE);
 			process_exec (file_name);
+			curr->ss->exit_status = -1;
+			thread_exit ();
 			break;
+		}
 		case SYS_WAIT :
 			f->R.rax = process_wait ((tid_t)f->R.rdi);
 			break;
@@ -140,26 +140,35 @@ syscall_handler (struct intr_frame *f UNUSED) {
 				thread_exit ();
 				NOT_REACHED ();
 			}
-			f->R.rax = filesys_create ((char *)f->R.rdi, (off_t)f->R.rsi);
+			f->R.rax = filesys_create (f->R.rdi, f->R.rsi);
 			break;
 		case SYS_REMOVE :
 			break;
-		case SYS_OPEN : {
+		case SYS_OPEN :
+		{
 			if (!is_valid (f)) {
-				f->R.rax = 0;
 				curr->ss->exit_status = -1;
 				thread_exit ();
 				NOT_REACHED ();
 			}
-			struct file *file = filesys_open ((const char *)f->R.rdi);
+			f->R.rax = -1;
+			struct file *file = filesys_open (f->R.rdi);
 			if (file == NULL) {
-				f->R.rax = -1;
 				break;
 			}
-			int success = file_descripter(file);
-			if (success == -1)
+			struct fd_entry *fde = malloc (sizeof (struct fd_entry));
+			if (fde == NULL) {
 				file_close (file);
-			f->R.rax = success;
+				break;
+			}
+			fde->file = file;
+
+			if (list_empty (&curr->fd_table))
+				fde->fd = 2;
+			else
+				fde->fd = list_entry (list_back (&curr->fd_table), struct fd_entry, elem)->fd + 1;
+			list_push_back (&curr->fd_table, &fde->elem);
+			f->R.rax = fde->fd;
 			break;
 		}
 		case SYS_FILESIZE :
@@ -173,10 +182,9 @@ syscall_handler (struct intr_frame *f UNUSED) {
 				}
 			}			
 			break;
-		case SYS_READ : {
-			/* Edge case 처리 */	
+		case SYS_READ :
+		{
 			if (!is_valid (f)) {
-				f->R.rax = 0;
 				curr->ss->exit_status = -1;
 				thread_exit ();
 				NOT_REACHED ();
@@ -187,19 +195,18 @@ syscall_handler (struct intr_frame *f UNUSED) {
 				for (size_t i = 0; i < f->R.rdx; i++) 
 					buffer[i] = input_getc ();
 				f->R.rax = f->R.rdx;
+				break;
 			}
-			else {
-				f->R.rax = -1;
-				for (struct list_elem *e = list_begin (&curr->fd_table); e != list_end (&curr->fd_table); e = list_next (e)){
-					if (f->R.rdi == list_entry (e, struct fd_entry, elem)->fd) {
-						f->R.rax = file_read (list_entry (e, struct fd_entry, elem)->file, (void *)f->R.rsi, f->R.rdx);
-						break;
-					}
+			f->R.rax = -1;
+			for (struct list_elem *e = list_begin (&curr->fd_table); e != list_end (&curr->fd_table); e = list_next (e)){
+				if (f->R.rdi == list_entry (e, struct fd_entry, elem)->fd) {
+					f->R.rax = file_read (list_entry (e, struct fd_entry, elem)->file, (void *)f->R.rsi, f->R.rdx);
+					break;
 				}
 			}
 			break;
 		}
-		case SYS_WRITE : {
+		case SYS_WRITE :
 			if (!is_valid (f)) {
 				curr->ss->exit_status = -1;
 				thread_exit ();
@@ -207,22 +214,32 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			}
 			if (f->R.rdi == STDOUT_FILENO) {
 				putbuf ((char *)f->R.rsi, f->R.rdx);
-				f->R.rax = f->R.rdx;	
+				f->R.rax = f->R.rdx;
+				break;
 			}
-			else {
-				f->R.rax = -1;
-				for (struct list_elem *e = list_begin (&curr->fd_table); e != list_end (&curr->fd_table); e = list_next (e)){
-					if (f->R.rdi == list_entry (e, struct fd_entry, elem)->fd) {
-						f->R.rax = file_write (list_entry (e, struct fd_entry, elem)->file, (const void *)f->R.rsi, f->R.rdx);
-						break;
-					}
+			f->R.rax = -1;
+			for (struct list_elem *e = list_begin (&curr->fd_table); e != list_end (&curr->fd_table); e = e->next) {
+				struct fd_entry *fde = list_entry (e, struct fd_entry, elem);
+				if (fde->fd == f->R.rdi) {
+					f->R.rax = file_write (fde->file, f->R.rsi, f->R.rdx);
+					break;
 				}
 			}
 			break;
-		}
+		
 		case SYS_SEEK :
 		case SYS_TELL :
 		case SYS_CLOSE :
+			for (struct list_elem *e = list_begin (&curr->fd_table); e != list_end (&curr->fd_table); e = e->next) {
+				struct fd_entry *fde = list_entry (e, struct fd_entry, elem);
+				if (fde->fd == f->R.rdi) {
+					file_close (fde->file);
+					list_remove (&fde->elem);
+					free (fde);
+					break;
+				}
+			}
+			break;
 		case SYS_DUP2 :
 		case SYS_MMAP :
 		case SYS_MUNMAP :

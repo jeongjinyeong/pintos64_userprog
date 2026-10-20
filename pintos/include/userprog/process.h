@@ -15,10 +15,11 @@ struct shared_status {
 };
 
 struct fork_struct {
+
 	struct thread *parent;
 	struct intr_frame *if_;
-	struct semaphore sema;
-	bool success;
+  struct semaphore sema;
+  bool success;
 };
 
 tid_t process_create_initd (const char *file_name);

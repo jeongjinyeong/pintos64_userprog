@@ -44,28 +44,21 @@ process_create_initd (const char *file_name) {
 	char *fn_copy;
 	tid_t tid;
 
-	char *save_ptr;
-	char *copy = copy_file_name (file_name);
-	if (!copy)
-		return TID_ERROR;
-
-	char *token = strtok_r (copy, " ", &save_ptr);
-	/* 출력용 파일 이름 복사 */
-	strlcpy (&thread_current()->name, token, sizeof (thread_current()->name));
-
 	/* Make a copy of FILE_NAME.
 	 * Otherwise there's a race between the caller and load(). */
-	/* execute 통일성을 위한 페이지 할당*/
 	fn_copy = palloc_get_page (0);
 	if (fn_copy == NULL)
 		return TID_ERROR;
 	strlcpy (fn_copy, file_name, PGSIZE);
 
+	int len = strcspn(file_name, " ");
+	char *name = malloc (sizeof (len) + 1);
+	if (name == NULL)
+		return TID_ERROR;
+	strlcpy (name, file_name, len + 1);
+
 	/* Create a new thread to execute FILE_NAME. */
-	tid = thread_create (token, PRI_DEFAULT, initd, fn_copy);
-
-	free (copy);
-
+	tid = thread_create (name, PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
 	return tid;
@@ -89,19 +82,18 @@ initd (void *f_name) {
 tid_t
 process_fork (const char *name, struct intr_frame *if_) {
 	/* Clone current thread to new thread.*/
-	struct fork_struct fork_struct_;
-	fork_struct_.parent = thread_current ();
-	fork_struct_.if_ = if_;
-	fork_struct_.success = false;
-	sema_init (&fork_struct_.sema, 0);
-
-	tid_t tid = thread_create (name, PRI_DEFAULT, __do_fork, &fork_struct_);
+	struct fork_struct fork_struct;
+	fork_struct.parent = thread_current ();
+	fork_struct.if_ = if_;
+	sema_init (&fork_struct.sema, 0);
+	
+	tid_t tid = thread_create (name, PRI_DEFAULT, __do_fork, &fork_struct);
 	if (tid == TID_ERROR)
-		return tid;
+		return TID_ERROR;
 
-	sema_down (&fork_struct_.sema);
+	sema_down (&fork_struct.sema);
 
-	return fork_struct_.success? tid : TID_ERROR;
+	return fork_struct.success ? tid : TID_ERROR;
 }
 
 #ifndef VM
@@ -125,6 +117,8 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 
 	/* 2. Resolve VA from the parent's page map level 4. */
 	parent_page = pml4_get_page (parent->pml4, va);
+	if (parent_page == NULL)
+		return false;
 
 	/* 3. TODO: Allocate new PAL_USER page for the child and set result to
 	 *    TODO: NEWPAGE. */
@@ -137,10 +131,12 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 	/* 4. TODO: Duplicate parent's page to the new page and
 	 *    TODO: check whether parent's page is writable or not (set WRITABLE
 	 *    TODO: according to the result). */
+
 	memcpy (newpage, parent_page, PGSIZE);
+	writable = is_writable (pte);
+
 	/* 5. Add new page to child's page table at address VA with WRITABLE
 	 *    permission. */
-	writable = is_writable (pte);
 	if (!pml4_set_page (current->pml4, va, newpage, writable)) {
 		/* 6. TODO: if fail to insert page, do error handling. */
 		palloc_free_page (newpage);
@@ -191,17 +187,17 @@ __do_fork (void *aux) {
 	intr_set_level (old_level);
 
 	for (struct list_elem *e = list_begin (&parent->fd_table); e != list_end (&parent->fd_table); e = list_next (e)) {
-		struct fd_entry *fde = malloc (sizeof (struct fd_entry));
-		if (fde == NULL)
+		struct fd_entry *fde_copy = malloc (sizeof (struct fd_entry));
+		if (fde_copy == NULL)
 			goto error;
-		struct fd_entry *parent_fde = list_entry (e, struct fd_entry, elem);
-		fde->fd = parent_fde->fd;
-		fde->file = file_duplicate (parent_fde->file);
-		if (fde->file == NULL) {
-			free (fde);
+		struct fd_entry *fde = list_entry (e, struct fd_entry, elem);
+		fde_copy->fd = fde->fd;
+		fde_copy->file = file_duplicate (fde->file);
+		if (fde_copy->file == NULL) {
+			free (fde_copy);
 			goto error;
 		}
-		list_push_back (&current->fd_table, &fde->elem);
+		list_push_back (&current->fd_table, &fde_copy->elem);
 	}
 	process_init ();
 	
@@ -227,6 +223,7 @@ error:
  * Returns -1 on fail. */
 int
 process_exec (void *f_name) {
+	char *file_name = f_name;
 	bool success;
 
 	/* We cannot use the intr_frame in the thread structure.
@@ -243,10 +240,10 @@ process_exec (void *f_name) {
 	process_cleanup ();
 
 	/* And then load the binary */
-	success = load (f_name, &_if);
+	success = load (file_name, &_if);
 
 	/* If load failed, quit. */
-	palloc_free_page (f_name);
+	palloc_free_page (file_name);
 	if (!success) 
 		return -1;
 
@@ -303,17 +300,30 @@ process_exit (void) {
 		return;	
 
 	uint64_t *pml4 = curr->pml4;
-	struct list *c_list = &curr->children;						
+	struct list *c_list = &curr->children;
+	struct list *fd_table = &curr->fd_table;				
 
 	while (!list_empty(c_list)) {
-		enum intr_level old_level = intr_disable();
+		enum intr_level old_level = intr_disable ();
 
-		struct list_elem *e = list_pop_front(c_list);
-		struct shared_status *child_ss = list_entry(e, struct shared_status, elem);
+		struct list_elem *e = list_pop_front (c_list);
+		struct shared_status *child_ss = list_entry (e, struct shared_status, elem);
 				
 		child_ss->ref_cnt--;							
 		if (child_ss->ref_cnt == 0) 
-			free(child_ss);		
+			free (child_ss);		
+
+		intr_set_level(old_level);
+	}
+
+	while (!list_empty(fd_table)) {
+		enum intr_level old_level = intr_disable ();
+
+		struct list_elem *e = list_pop_front (fd_table);
+		struct fd_entry *fde = list_entry (e, struct fd_entry, elem);
+
+		file_close (fde->file);
+		free (fde);
 
 		intr_set_level(old_level);
 	}
