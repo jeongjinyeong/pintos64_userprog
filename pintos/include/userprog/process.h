@@ -16,7 +16,7 @@ struct shared_status {
 
 struct fork_struct {
 	struct thread *parent;
-	struct intr_frame if_;
+	struct intr_frame *if_;
 	struct semaphore sema;
 	bool success;
 };

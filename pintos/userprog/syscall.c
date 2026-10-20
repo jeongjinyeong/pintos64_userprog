@@ -8,6 +8,9 @@
 #include "threads/flags.h"
 #include "intrinsic.h"
 #include "userprog/process.h"
+#include "filesys/filesys.h"
+#include "filesys/file.h"
+#include "threads/palloc.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -41,7 +44,7 @@ syscall_init (void) {
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
-	struct thread *curr = thread_current();
+	struct thread *curr = thread_current ();
 	switch (f->R.rax) {
 		case SYS_HALT :
 			break;
@@ -51,17 +54,33 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			NOT_REACHED ();
 			break;
 		case SYS_FORK :
-			f->R.rax = process_fork((char *)f->R.rdi, f);
+			f->R.rax = process_fork ((char *)f->R.rdi, f);
 			break;
 		case SYS_EXEC :
+			f->R.rax = -1;
+			char *file_name = palloc_get_page (0);
+			if (file_name == NULL)
+				break;
+			strlcpy (file_name, (char *)f->R.rdi, PGSIZE);
+			process_exec (file_name);
 			break;
 		case SYS_WAIT :
 			/* 인자는 rdi */
-			f->R.rax = process_wait((tid_t)f->R.rdi);
+			f->R.rax = process_wait ((tid_t)f->R.rdi);
 			break;
 		case SYS_CREATE :
 		case SYS_REMOVE :
 		case SYS_OPEN :
+			struct file *file = filesys_open ((const char *)f->R.rdi);
+			if (file == NULL) {
+				f->R.rax = -1;
+				break;
+			}
+			int success = file_descripter(file);
+			if (success == -1)
+				file_close (file);
+			f->R.rax = success;
+			break;
 		case SYS_FILESIZE :
 		case SYS_READ :
 			break;

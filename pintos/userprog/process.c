@@ -51,11 +51,26 @@ process_create_initd (const char *file_name) {
 		return TID_ERROR;
 	strlcpy (fn_copy, file_name, PGSIZE);
 
+	char *filename = malloc (strlen (file_name) + 1);
+	if (filename == NULL) {
+		free (filename);
+		palloc_free_page (fn_copy);
+		return TID_ERROR;
+	}
+	strlcpy (filename, file_name, strlen(file_name) + 1);
+	char *save_ptr;
+	char *argv = strtok_r (filename, " ", &save_ptr);
+
+	if (argv == NULL) {
+		free (filename);
+		palloc_free_page (fn_copy);
+		return TID_ERROR;
+	}
 	/* Create a new thread to execute FILE_NAME. */
-	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
+	tid = thread_create (argv, PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
-	
+	free (filename);
 	return tid;
 }
 
@@ -83,7 +98,7 @@ process_fork (const char *name, struct intr_frame *if_) {
 		return TID_ERROR;
 
 	fs->parent = curr;
-	fs->if_ = *if_;
+	fs->if_ = if_;
 	fs->success = false;
 	sema_init (&fs->sema, 0);
 
@@ -150,11 +165,11 @@ __do_fork (void *aux) {
 	struct thread *parent = fs->parent;
 	struct thread *current = thread_current ();
 	/* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
-	struct intr_frame parent_if = fs->if_;
+	struct intr_frame *parent_if = fs->if_;
 	bool succ = true;
 
 	/* 1. Read the cpu context to local stack. */
-	memcpy (&if_, &parent_if, sizeof (struct intr_frame));
+	memcpy (&if_, parent_if, sizeof (struct intr_frame));
 	/* 2. Duplicate PT */
 	current->pml4 = pml4_create();
 	if (current->pml4 == NULL)
@@ -195,7 +210,6 @@ error:
  * Returns -1 on fail. */
 int
 process_exec (void *f_name) {
-	char *file_name = f_name;
 	bool success;
 
 	/* We cannot use the intr_frame in the thread structure.
@@ -210,16 +224,15 @@ process_exec (void *f_name) {
 	process_cleanup ();
 
 	/* And then load the binary */
-	success = load (file_name, &_if);
-
-	/* 레지스터 값 찍어보는 코드 - HJM */
-	// hex_dump(_if.rsp, _if.rsp, USER_STACK - _if.rsp, true);
+	success = load (f_name, &_if);
 
 	/* If load failed, quit. */
-	palloc_free_page (file_name);
-	if (!success)
-		return -1;
-
+	palloc_free_page (f_name);
+	if (!success) {
+		thread_current()->ss->exit_status = -1;
+		thread_exit ();
+		NOT_REACHED ();
+	}
 	/* Start switched process. */
 	do_iret (&_if);
 	NOT_REACHED ();
@@ -442,7 +455,6 @@ load (const char *file_name, struct intr_frame *if_) {
 		argv[argc++] = token;
 
 	/* 출력용 파일 이름 복사 */
-	strlcpy (&t->name, argv[0], strlen(argv[0]) + 1);
 
 	/* Open executable file. */
 	file = filesys_open (argv[0]);
