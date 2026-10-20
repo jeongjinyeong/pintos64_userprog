@@ -8,6 +8,8 @@
 #include "threads/flags.h"
 #include "intrinsic.h"
 #include "userprog/process.h"
+#include "threads/palloc.h"
+#include <string.h>
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -38,6 +40,12 @@ syscall_init (void) {
 			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
 }
 
+bool is_valid (struct intr_frame *f UNUSED) {
+	switch (f->R.rax) {
+
+	}
+}
+
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
@@ -54,6 +62,39 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			f->R.rax = process_fork ((const char *)f->R.rdi, f);
 			break;
 		case SYS_EXEC :
+			const char *cmd_line = (char *)f->R.rdi;
+			char *kernel_buf;		
+			int len;
+
+			if (!cmd_line || is_kernel_vaddr (cmd_line)) 
+				goto error;					
+			
+			for (int i = 0; i < PGSIZE; i++) {
+				char *check = cmd_line + i;
+
+				if (i == 0 || pg_ofs (check) == 0)
+					if (is_kernel_vaddr (check) || !pml4_get_page (curr->pml4, check))
+						goto error;
+
+				if (*check == '\0') {
+					len = i + 1;
+					goto copy;
+				}
+			}
+			goto error;
+			
+			copy:
+				kernel_buf = palloc_get_page(0);
+				if (!kernel_buf)
+					goto error;
+				memcpy (kernel_buf, cmd_line, len);
+
+			if (process_exec (kernel_buf) == -1) 
+				goto error;
+
+			error:
+				curr->ss->exit_status = -1;
+				thread_exit();
 			break;
 		case SYS_WAIT :
 			/* 인자는 rdi */
