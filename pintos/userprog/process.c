@@ -89,29 +89,19 @@ initd (void *f_name) {
 tid_t
 process_fork (const char *name, struct intr_frame *if_) {
 	/* Clone current thread to new thread.*/
-	struct thread *curr = thread_current ();
-	struct fork_struct *fs = malloc(sizeof(struct fork_struct));
-	if (fs == NULL)
-		return TID_ERROR;
+	struct fork_struct fork_struct_;
+	fork_struct_.parent = thread_current ();
+	fork_struct_.if_ = if_;
+	fork_struct_.success = false;
+	sema_init (&fork_struct_.sema, 0);
 
-	fs->parent = curr;
-	fs->if_ = if_;
-	fs->success = false;
-	sema_init (&fs->sema, 0);
+	tid_t tid = thread_create (name, PRI_DEFAULT, __do_fork, &fork_struct_);
+	if (tid == TID_ERROR)
+		return tid;
 
-	tid_t tid =  thread_create (name,
-			PRI_DEFAULT, __do_fork, fs);
+	sema_down (&fork_struct_.sema);
 
-	if (tid == TID_ERROR) {
-		free (fs);
-		return TID_ERROR;
-	}
-	sema_down (&fs->sema);
-
-	bool success = fs->success;
-	free (fs);
-
-	return success ? tid : TID_ERROR;
+	return fork_struct_.success? tid : TID_ERROR;
 }
 
 #ifndef VM
@@ -156,6 +146,7 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 		palloc_free_page (newpage);
 		return false;
 	}
+
 	return true;
 }
 #endif
@@ -242,6 +233,8 @@ process_exec (void *f_name) {
 	 * This is because when current thread rescheduled,
 	 * it stores the execution information to the member. */
 	struct intr_frame _if;
+	memset(&_if, 0, sizeof _if);
+	
 	_if.ds = _if.es = _if.ss = SEL_UDSEG;
 	_if.cs = SEL_UCSEG;
 	_if.eflags = FLAG_IF | FLAG_MBS;
