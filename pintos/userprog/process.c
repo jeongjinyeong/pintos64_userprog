@@ -68,7 +68,6 @@ process_create_initd (const char *file_name) {
 
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
-	
 	return tid;
 }
 
@@ -88,28 +87,31 @@ initd (void *f_name) {
 /* Clones the current process as `name`. Returns the new process's thread id, or
  * TID_ERROR if the thread cannot be created. */
 tid_t
-process_fork (const char *name, struct intr_frame *if_ UNUSED) {
+process_fork (const char *name, struct intr_frame *if_) {
 	/* Clone current thread to new thread.*/
-	struct fork_struct *fs = malloc (sizeof (struct fork_struct));
-	fs->if_ = if_;
-	fs->parent = thread_current ();
-	sema_init (&fs->fork_done, 0);
-	fs->fork_success = false;
-
-	/* fork 시작 */
-	tid_t child_tid = thread_create (name, PRI_DEFAULT, __do_fork, fs);
-	if (child_tid == TID_ERROR)
+	struct thread *curr = thread_current ();
+	struct fork_struct *fs = malloc(sizeof(struct fork_struct));
+	if (fs == NULL)
 		return TID_ERROR;
 
-	/* 자식의 fork 기다리기*/
-	sema_down (&fs->fork_done);
-	if (fs->fork_success) {
+	fs->parent = curr;
+	fs->if_ = if_;
+	fs->success = false;
+	sema_init (&fs->sema, 0);
+
+	tid_t tid =  thread_create (name,
+			PRI_DEFAULT, __do_fork, fs);
+
+	if (tid == TID_ERROR) {
 		free (fs);
-		return child_tid;
+		return TID_ERROR;
 	}
-	
+	sema_down (&fs->sema);
+
+	bool success = fs->success;
 	free (fs);
-	return TID_ERROR;
+
+	return success ? tid : TID_ERROR;
 }
 
 #ifndef VM
@@ -146,10 +148,9 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 	 *    TODO: check whether parent's page is writable or not (set WRITABLE
 	 *    TODO: according to the result). */
 	memcpy (newpage, parent_page, PGSIZE);
-	writable = is_writable(pte);
-
 	/* 5. Add new page to child's page table at address VA with WRITABLE
 	 *    permission. */
+	writable = is_writable (pte);
 	if (!pml4_set_page (current->pml4, va, newpage, writable)) {
 		/* 6. TODO: if fail to insert page, do error handling. */
 		palloc_free_page (newpage);
@@ -176,8 +177,6 @@ __do_fork (void *aux) {
 	
 	/* 1. Read the cpu context to local stack. */
 	memcpy (&if_, parent_if, sizeof (struct intr_frame));
-	/* 자식의 반환값을 별도로 설정해주어야 한다. */
-	if_.R.rax = 0;
 	/* 2. Duplicate PT */
 	current->pml4 = pml4_create ();
 	if (current->pml4 == NULL)
@@ -198,32 +197,38 @@ __do_fork (void *aux) {
 	 * TODO:       in include/filesys/file.h. Note that parent should not return
 	 * TODO:       from the fork() until this function successfully duplicates
 	 * TODO:       the resources of parent.*/
-	struct list_elem *e;
-	struct list *fd_table = &parent->fd_table;
-	for (e = list_begin (fd_table); e != list_end (fd_table); e = list_next (e)) {
-		struct fd_entry *fd_e = list_entry (e, struct fd_entry, elem);
-		struct fd_entry *copy = malloc (sizeof (struct fd_entry));
-		if (!copy)
-			break;
-		
-		struct file *f = file_duplicate (fd_e->file);
-		copy->file = f;
-		copy->fd = fd_e->fd;
-		list_push_back(&current->fd_table, &copy->elem);
-	}
-
-	/* fork 성공 */
-	fs->fork_success = true;
-	sema_up (&fs->fork_done);
 	intr_set_level (old_level);
+
+	for (struct list_elem *e = list_begin (&parent->fd_table); e != list_end (&parent->fd_table); e = list_next (e)) {
+		struct fd_entry *fde = malloc (sizeof (struct fd_entry));
+		if (fde == NULL)
+			goto error;
+		struct fd_entry *parent_fde = list_entry (e, struct fd_entry, elem);
+		fde->fd = parent_fde->fd;
+		fde->file = file_duplicate (parent_fde->file);
+		if (fde->file == NULL) {
+			free (fde);
+			goto error;
+		}
+		list_push_back (&current->fd_table, &fde->elem);
+	}
 	process_init ();
 	
 	/* Finally, switch to the newly created process. */
-	if (succ)
+	if (succ) {
+		if_.R.rax = 0;
+		fs->success = true;
+		sema_up (&fs->sema);
 		do_iret (&if_);
+	}
 error:
-	fs->fork_success = false;
-	sema_up (&fs->fork_done);
+	while (!list_empty (&current->fd_table)) {
+		struct fd_entry *tmp = list_entry (list_pop_front (&current->fd_table), struct fd_entry, elem);
+		file_close (tmp->file);
+		free (tmp);
+	}
+	fs->success = false;
+	sema_up (&fs->sema);
 	thread_exit ();
 }
 
@@ -231,7 +236,6 @@ error:
  * Returns -1 on fail. */
 int
 process_exec (void *f_name) {
-	char *file_name = f_name;
 	bool success;
 
 	/* We cannot use the intr_frame in the thread structure.
@@ -246,13 +250,10 @@ process_exec (void *f_name) {
 	process_cleanup ();
 
 	/* And then load the binary */
-	success = load (file_name, &_if);
-
-	/* 레지스터 값 찍어보는 코드 - HJM */
-	// hex_dump(_if.rsp, _if.rsp, USER_STACK - _if.rsp, true);
+	success = load (f_name, &_if);
 
 	/* If load failed, quit. */
-	palloc_free_page (file_name);
+	palloc_free_page (f_name);
 	if (!success) 
 		return -1;
 
