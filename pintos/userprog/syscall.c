@@ -10,6 +10,8 @@
 #include "userprog/process.h"
 #include "threads/palloc.h"
 #include <string.h>
+#include "filesys/file.h"
+#include "filesys/filesys.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -71,10 +73,13 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			f->R.rax = process_wait((tid_t)f->R.rdi);
 			break;
 		case SYS_CREATE :
-			f->R.rax = filesys_create(f->R.rdi, f->R.rsi);
+			f->R.rax = filesys_create (f->R.rdi, f->R.rsi);
 			break;
 		case SYS_REMOVE :
 		case SYS_OPEN :
+			struct file *file = filesys_open (f->R.rdi);
+			f->R.rax = make_fd (file);
+			break;
 		case SYS_FILESIZE :
 		case SYS_READ :
 			break;
@@ -87,6 +92,13 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		case SYS_SEEK :
 		case SYS_TELL :
 		case SYS_CLOSE :
+			struct fd_entry *fd_e = find_file_discriptor(f->R.rdi);
+			if (fd_e) {
+				file_close (fd_e->file);
+				list_remove(&fd_e->elem);
+				free (fd_e);
+			}
+			break;
 		case SYS_DUP2 :
 		case SYS_MMAP :
 		case SYS_MUNMAP :

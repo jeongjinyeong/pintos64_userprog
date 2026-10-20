@@ -44,20 +44,27 @@ process_create_initd (const char *file_name) {
 	char *fn_copy;
 	tid_t tid;
 
+	char *save_ptr;
+	char *copy = copy_file_name (file_name);
+	if (!copy)
+		return TID_ERROR;
+
+	char *token = strtok_r (copy, " ", &save_ptr);
+	/* 출력용 파일 이름 복사 */
+	strlcpy (&thread_current()->name, token, sizeof (thread_current()->name));
+
 	/* Make a copy of FILE_NAME.
 	 * Otherwise there's a race between the caller and load(). */
+	/* execute 통일성을 위한 페이지 할당*/
 	fn_copy = palloc_get_page (0);
 	if (fn_copy == NULL)
 		return TID_ERROR;
 	strlcpy (fn_copy, file_name, PGSIZE);
 
 	/* Create a new thread to execute FILE_NAME. */
-	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
+	tid = thread_create (token, PRI_DEFAULT, initd, fn_copy);
 
-	char *save_ptr;
-	char *token = strtok_r (fn_copy, " ", &save_ptr);
-	/* 출력용 파일 이름 복사 */
-	strlcpy (&thread_current()->name, token, strlen(token) + 1);
+	free (copy);
 
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
@@ -191,10 +198,19 @@ __do_fork (void *aux) {
 	 * TODO:       in include/filesys/file.h. Note that parent should not return
 	 * TODO:       from the fork() until this function successfully duplicates
 	 * TODO:       the resources of parent.*/
-	// struct file *file;
-	// struct list_elem e;
-	// list_entry(&e, struct file, elem);
-	/* 종료 여부 */
+	struct list_elem *e;
+	struct list *fd_table = &parent->fd_table;
+	for (e = list_begin (fd_table); e != list_end (fd_table); e = list_next (fd_table)) {
+		struct fd_entry *fd_e = list_entry (e, struct fd_entry, elem);
+		struct fd_entry *copy = malloc (sizeof (struct fd_entry));
+
+		struct file *f = file_duplicate (fd_e->file);
+		copy->file = f;
+		copy->fd = fd_e->fd;
+		list_push_back(&current->fd_table, &copy->elem);
+	}
+
+	/* fork 성공 */
 	fs->fork_success = true;
 	sema_up (&fs->fork_done);
 	intr_set_level (old_level);
@@ -448,14 +464,12 @@ load (const char *file_name, struct intr_frame *if_) {
 	process_activate (thread_current ());
 
 	/*문자열 복제*/
-	size_t size = strlen (file_name) + 1;
-	char *copy = malloc (size);
+	char *copy = copy_file_name (file_name);
 
 	if (copy == NULL)
 		goto done;
 
 	/*문자열 파싱*/
-	strlcpy (copy, file_name, size);
 	for (token = strtok_r (copy, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr))
 		argv[argc++] = token;
 
@@ -568,8 +582,6 @@ load (const char *file_name, struct intr_frame *if_) {
 	*(uintptr_t *) if_->rsp = 0;
 
 	free (copy);
-
-	
 	success = true;
 
 done:
@@ -622,6 +634,15 @@ validate_segment (const struct Phdr *phdr, struct file *file) {
 
 	/* It's okay. */
 	return true;
+}
+
+/* 문자열 복사, 이후 free 필요 */
+char *
+copy_file_name (const char *file_name) {
+	size_t size = strlen (file_name) + 1;
+	char *copy = malloc (size);
+	strlcpy (copy, file_name, size);
+	return copy;
 }
 
 #ifndef VM

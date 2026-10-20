@@ -3,14 +3,13 @@
 #include "filesys/inode.h"
 #include "threads/malloc.h"
 #include "lib/kernel/list.h"
+#include "threads/thread.h"
 
 /* An open file. */
 struct file {
 	struct inode *inode;        /* File's inode. */
 	off_t pos;                  /* Current position. */
 	bool deny_write;            /* Has file_deny_write() been called? */
-	int fd;
-	struct list_elem elem;
 };
 
 /* Opens a file for the given INODE, of which it takes ownership,
@@ -161,4 +160,49 @@ off_t
 file_tell (struct file *file) {
 	ASSERT (file != NULL);
 	return file->pos;
+}
+
+int
+make_fd (struct file *file) {
+	struct list *fd_table = &thread_current ()->fd_table;
+	struct fd_entry *new_fd_e = malloc (sizeof (struct fd_entry));
+	int new_fd = 2;
+
+	if (!list_empty (fd_table))
+		new_fd = list_entry (list_back (fd_table), struct fd_entry, elem)->fd + 1;
+
+	new_fd_e->file = file;
+	new_fd_e->fd = new_fd;
+	list_push_back (fd_table, &new_fd_e->elem);
+	return new_fd;
+}
+
+/* file_discriptor를 찾는 함수 */
+struct fd_entry *
+find_file_discriptor (int fd) {
+	struct list_elem *e;
+	struct list *fd_table = &thread_current ()->fd_table;
+	
+	for (e = list_begin (fd_table); e != list_end (fd_table); e = list_next (fd_table)) {
+		struct fd_entry *fd_e = list_entry (e, struct fd_entry, elem);
+
+		if (fd_e->fd == fd) 
+			return fd_e;
+	}
+	return NULL;
+}
+
+int
+count_open_file (int fd) {
+	struct list_elem *e;
+	struct list *fd_table = &thread_current ()->fd_table;
+	int open_cnt = 0;
+	
+	for (e = list_begin (fd_table); e != list_end (fd_table); e = list_next (fd_table)) {
+		struct fd_entry *fd_e = list_entry (e, struct fd_entry, elem);
+
+		if (fd_e->fd == fd) 
+			open_cnt++;
+	}
+	return open_cnt;
 }
