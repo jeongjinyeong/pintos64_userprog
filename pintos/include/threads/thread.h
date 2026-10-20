@@ -106,6 +106,8 @@ struct thread {
 	struct shared_status *ss;
 	struct list children;
 
+	/* file discriptor */
+	struct list fd_table;
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */

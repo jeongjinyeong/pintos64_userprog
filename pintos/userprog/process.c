@@ -44,15 +44,28 @@ process_create_initd (const char *file_name) {
 	char *fn_copy;
 	tid_t tid;
 
+	char *save_ptr;
+	char *copy = copy_file_name (file_name);
+	if (!copy)
+		return TID_ERROR;
+
+	char *token = strtok_r (copy, " ", &save_ptr);
+	/* 출력용 파일 이름 복사 */
+	strlcpy (&thread_current()->name, token, sizeof (thread_current()->name));
+
 	/* Make a copy of FILE_NAME.
 	 * Otherwise there's a race between the caller and load(). */
+	/* execute 통일성을 위한 페이지 할당*/
 	fn_copy = palloc_get_page (0);
 	if (fn_copy == NULL)
 		return TID_ERROR;
 	strlcpy (fn_copy, file_name, PGSIZE);
 
 	/* Create a new thread to execute FILE_NAME. */
-	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
+	tid = thread_create (token, PRI_DEFAULT, initd, fn_copy);
+
+	free (copy);
+
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
 	
@@ -77,8 +90,26 @@ initd (void *f_name) {
 tid_t
 process_fork (const char *name, struct intr_frame *if_ UNUSED) {
 	/* Clone current thread to new thread.*/
-	return thread_create (name,
-			PRI_DEFAULT, __do_fork, thread_current ());
+	struct fork_struct *fs = malloc (sizeof (struct fork_struct));
+	fs->if_ = if_;
+	fs->parent = thread_current ();
+	sema_init (&fs->fork_done, 0);
+	fs->fork_success = false;
+
+	/* fork 시작 */
+	tid_t child_tid = thread_create (name, PRI_DEFAULT, __do_fork, fs);
+	if (child_tid == TID_ERROR)
+		return TID_ERROR;
+
+	/* 자식의 fork 기다리기*/
+	sema_down (&fs->fork_done);
+	if (fs->fork_success) {
+		free (fs);
+		return child_tid;
+	}
+	
+	free (fs);
+	return TID_ERROR;
 }
 
 #ifndef VM
@@ -93,21 +124,36 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 	bool writable;
 
 	/* 1. TODO: If the parent_page is kernel page, then return immediately. */
+	if (!parent->pml4)
+		return false;
+	
+	/* 커널 페이지인경우 건너뛰고 다음 페이지 복사 */
+	if (is_kernel_vaddr(va))
+		return true;
 
 	/* 2. Resolve VA from the parent's page map level 4. */
 	parent_page = pml4_get_page (parent->pml4, va);
 
 	/* 3. TODO: Allocate new PAL_USER page for the child and set result to
 	 *    TODO: NEWPAGE. */
+	newpage = palloc_get_page (PAL_USER);
+
+	/* 페이지 할당에 실패하거나 부모 페이지가 없는 경우 */
+	if (!newpage || !parent_page)
+		return false;
 
 	/* 4. TODO: Duplicate parent's page to the new page and
 	 *    TODO: check whether parent's page is writable or not (set WRITABLE
 	 *    TODO: according to the result). */
+	memcpy (newpage, parent_page, PGSIZE);
+	writable = is_writable(pte);
 
 	/* 5. Add new page to child's page table at address VA with WRITABLE
 	 *    permission. */
 	if (!pml4_set_page (current->pml4, va, newpage, writable)) {
 		/* 6. TODO: if fail to insert page, do error handling. */
+		palloc_free_page (newpage);
+		return false;
 	}
 	return true;
 }
@@ -119,18 +165,21 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
  *       this function. */
 static void
 __do_fork (void *aux) {
+	enum intr_level old_level = intr_disable ();
 	struct intr_frame if_;
-	struct thread *parent = (struct thread *) aux;
+	struct fork_struct *fs = (struct fork_struct *) aux;
+	struct thread *parent = fs->parent;
 	struct thread *current = thread_current ();
 	/* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
-	struct intr_frame *parent_if;
+	struct intr_frame *parent_if = fs->if_;
 	bool succ = true;
-
+	
 	/* 1. Read the cpu context to local stack. */
 	memcpy (&if_, parent_if, sizeof (struct intr_frame));
-
+	/* 자식의 반환값을 별도로 설정해주어야 한다. */
+	if_.R.rax = 0;
 	/* 2. Duplicate PT */
-	current->pml4 = pml4_create();
+	current->pml4 = pml4_create ();
 	if (current->pml4 == NULL)
 		goto error;
 
@@ -149,13 +198,32 @@ __do_fork (void *aux) {
 	 * TODO:       in include/filesys/file.h. Note that parent should not return
 	 * TODO:       from the fork() until this function successfully duplicates
 	 * TODO:       the resources of parent.*/
+	struct list_elem *e;
+	struct list *fd_table = &parent->fd_table;
+	for (e = list_begin (fd_table); e != list_end (fd_table); e = list_next (e)) {
+		struct fd_entry *fd_e = list_entry (e, struct fd_entry, elem);
+		struct fd_entry *copy = malloc (sizeof (struct fd_entry));
+		if (!copy)
+			break;
+		
+		struct file *f = file_duplicate (fd_e->file);
+		copy->file = f;
+		copy->fd = fd_e->fd;
+		list_push_back(&current->fd_table, &copy->elem);
+	}
 
+	/* fork 성공 */
+	fs->fork_success = true;
+	sema_up (&fs->fork_done);
+	intr_set_level (old_level);
 	process_init ();
-
+	
 	/* Finally, switch to the newly created process. */
 	if (succ)
 		do_iret (&if_);
 error:
+	fs->fork_success = false;
+	sema_up (&fs->fork_done);
 	thread_exit ();
 }
 
@@ -185,7 +253,7 @@ process_exec (void *f_name) {
 
 	/* If load failed, quit. */
 	palloc_free_page (file_name);
-	if (!success)
+	if (!success) 
 		return -1;
 
 	/* Start switched process. */
@@ -398,19 +466,14 @@ load (const char *file_name, struct intr_frame *if_) {
 	process_activate (thread_current ());
 
 	/*문자열 복제*/
-	size_t size = strlen (file_name) + 1;
-	char *copy = malloc (size);
+	char *copy = copy_file_name (file_name);
 
 	if (copy == NULL)
 		goto done;
 
 	/*문자열 파싱*/
-	strlcpy (copy, file_name, size);
 	for (token = strtok_r (copy, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr))
 		argv[argc++] = token;
-
-	/* 출력용 파일 이름 복사 */
-	strlcpy (&t->name, argv[0], strlen(argv[0]) + 1);
 
 	/* Open executable file. */
 	file = filesys_open (argv[0]);
@@ -521,8 +584,6 @@ load (const char *file_name, struct intr_frame *if_) {
 	*(uintptr_t *) if_->rsp = 0;
 
 	free (copy);
-
-	
 	success = true;
 
 done:
@@ -575,6 +636,15 @@ validate_segment (const struct Phdr *phdr, struct file *file) {
 
 	/* It's okay. */
 	return true;
+}
+
+/* 문자열 복사, 이후 free 필요 */
+char *
+copy_file_name (const char *file_name) {
+	size_t size = strlen (file_name) + 1;
+	char *copy = malloc (size);
+	strlcpy (copy, file_name, size);
+	return copy;
 }
 
 #ifndef VM
