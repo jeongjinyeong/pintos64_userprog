@@ -51,7 +51,8 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			NOT_REACHED ();
 			break;
 		case SYS_FORK :	
-			process_fork(curr->name, f);
+			f->R.rax = process_fork ((const char *)f->R.rdi, f);
+			break;
 		case SYS_EXEC :
 			break;
 		case SYS_WAIT :
