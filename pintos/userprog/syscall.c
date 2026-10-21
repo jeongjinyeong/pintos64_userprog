@@ -56,7 +56,22 @@ is_valid (struct intr_frame *f UNUSED) {
 		case SYS_EXEC :
 		case SYS_FORK :
 		case SYS_CREATE :
-		case SYS_OPEN : {
+		case SYS_REMOVE : 
+		{
+			const char *fn_copy = (const char*)f->R.rdi;
+			while (true) {
+				if (is_user_vaddr (fn_copy) && pml4_get_page (curr->pml4, fn_copy)) {
+					if (*fn_copy == '\0')
+						break;
+					fn_copy++;
+				}
+				else
+					return false;
+			}		
+			break;
+		}
+		case SYS_OPEN : 
+		{
 			const char *fn_copy = (const char*)f->R.rdi;
 			while (true) {
 				if (is_user_vaddr (fn_copy) && pml4_get_page (curr->pml4, fn_copy)) {
@@ -87,6 +102,12 @@ is_valid (struct intr_frame *f UNUSED) {
 				page_addr += PGSIZE;
 			}
 		}
+		case SYS_SEEK :
+			/* 파일이 열려있는지 확인 */
+			break;		
+		case SYS_TELL :
+
+			break;
 		default :
 			break;
 	}
@@ -143,6 +164,14 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			f->R.rax = filesys_create (f->R.rdi, f->R.rsi);
 			break;
 		case SYS_REMOVE :
+			if (!is_valid (f)) {
+				curr->ss->exit_status = -1;
+				thread_exit ();
+				NOT_REACHED ();
+			}
+			lock_acquire (&filesys_lock);
+			f->R.rax = filesys_remove (f->R.rdi);
+			lock_release (&filesys_lock);			
 			break;
 		case SYS_OPEN :
 		{
@@ -232,7 +261,38 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			break;
 		
 		case SYS_SEEK :
+			if (!is_valid (f)) {
+				curr->ss->exit_status = -1;
+				thread_exit ();
+				NOT_REACHED ();
+			}
+			for (struct list_elem *e = list_begin (&curr->fd_table); e != list_end (&curr->fd_table); e = e->next) {
+				struct fd_entry *fde = list_entry (e, struct fd_entry, elem);
+				if (fde->fd == f->R.rdi) {
+					lock_acquire (&filesys_lock);
+					file_seek (fde->file, f->R.rsi);
+					lock_release (&filesys_lock);
+					break;
+				}
+			}
+			break;
+
 		case SYS_TELL :
+			if (!is_valid (f)) {
+				curr->ss->exit_status = -1;
+				thread_exit ();
+				NOT_REACHED ();
+			}
+			for (struct list_elem *e = list_begin (&curr->fd_table); e != list_end (&curr->fd_table); e = e->next) {
+				struct fd_entry *fde = list_entry (e, struct fd_entry, elem);
+				if (fde->fd == f->R.rdi) {
+					lock_acquire (&filesys_lock);					
+					f->R.rax = file_tell(fde->file);					
+					lock_release (&filesys_lock);
+					break;
+				}
+			}
+			break;
 		case SYS_CLOSE :
 			for (struct list_elem *e = list_begin (&curr->fd_table); e != list_end (&curr->fd_table); e = e->next) {
 				struct fd_entry *fde = list_entry (e, struct fd_entry, elem);
