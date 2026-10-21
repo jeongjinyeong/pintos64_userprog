@@ -92,6 +92,14 @@ is_valid (struct intr_frame *f UNUSED) {
 	}
 	return true;
 }
+void
+valid_handler (struct intr_frame *f) {
+	if (!is_valid (f)) {
+		thread_current ()->ss->exit_status = -1;
+		thread_exit ();
+		NOT_REACHED ();
+	}
+}
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
@@ -106,20 +114,12 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			NOT_REACHED ();
 			break;
 		case SYS_FORK :
-			if (!is_valid (f)) {
-				curr->ss->exit_status = -1;
-				thread_exit ();
-				NOT_REACHED ();
-			}
+			valid_handler (f);
 			f->R.rax = process_fork (f->R.rdi, f);
 			break;
 		case SYS_EXEC :
 		{
-			if (!is_valid (f)) {
-				curr->ss->exit_status = -1;
-				thread_exit ();
-				NOT_REACHED ();
-			}
+			valid_handler (f);
 			char *file_name = palloc_get_page (PAL_ZERO);
 			if (file_name == NULL) {
 				curr->ss->exit_status = -1;
@@ -135,22 +135,14 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			f->R.rax = process_wait ((tid_t)f->R.rdi);
 			break;
 		case SYS_CREATE :
-			if (!is_valid (f)) {
-				curr->ss->exit_status = -1;
-				thread_exit ();
-				NOT_REACHED ();
-			}
+			valid_handler (f);
 			f->R.rax = filesys_create (f->R.rdi, f->R.rsi);
 			break;
 		case SYS_REMOVE :
 			break;
 		case SYS_OPEN :
 		{
-			if (!is_valid (f)) {
-				curr->ss->exit_status = -1;
-				thread_exit ();
-				NOT_REACHED ();
-			}
+			valid_handler (f);
 			f->R.rax = -1;
 			struct file *file = filesys_open (f->R.rdi);
 			if (file == NULL) {
@@ -184,11 +176,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			break;
 		case SYS_READ :
 		{
-			if (!is_valid (f)) {
-				curr->ss->exit_status = -1;
-				thread_exit ();
-				NOT_REACHED ();
-			}
+			valid_handler (f);
 
 			if (f->R.rdi == STDIN_FILENO) {
 				char *buffer = (char *)f->R.rsi;
@@ -209,11 +197,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			break;
 		}
 		case SYS_WRITE :
-			if (!is_valid (f)) {
-				curr->ss->exit_status = -1;
-				thread_exit ();
-				NOT_REACHED ();
-			}
+			valid_handler (f);
 			if (f->R.rdi == STDOUT_FILENO) {
 				putbuf ((char *)f->R.rsi, f->R.rdx);
 				f->R.rax = f->R.rdx;
@@ -232,7 +216,27 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			break;
 		
 		case SYS_SEEK :
+			for (struct list_elem *e = list_begin (&curr->fd_table); e != list_end (&curr->fd_table); e = list_next (e)) {
+				struct fd_entry *fde = list_entry (e, struct fd_entry, elem);
+				if (fde->fd == f->R.rdi) {
+					lock_acquire (&filesys_lock);
+					file_seek (fde->file, f->R.rsi);
+					lock_release (&filesys_lock);
+					break;
+				}
+			}
+			break;
 		case SYS_TELL :
+			for (struct list_elem *e = list_begin (&curr->fd_table); e != list_end (&curr->fd_table); e = list_next (e)) {
+				struct fd_entry *fde = list_entry (e, struct fd_entry, elem);
+				if (fde->fd == f->R.rdi) {
+					lock_acquire (&filesys_lock);
+					f->R.rax = file_tell (fde->file);
+					lock_release (&filesys_lock);
+					break;
+				}
+			}
+			break;
 		case SYS_CLOSE :
 			for (struct list_elem *e = list_begin (&curr->fd_table); e != list_end (&curr->fd_table); e = e->next) {
 				struct fd_entry *fde = list_entry (e, struct fd_entry, elem);
