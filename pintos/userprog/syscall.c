@@ -49,6 +49,7 @@ syscall_init (void) {
 	write_msr(MSR_SYSCALL_MASK,
 			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
 }
+
 bool
 is_valid (struct intr_frame *f UNUSED) {
 	struct thread *curr = thread_current ();
@@ -56,6 +57,7 @@ is_valid (struct intr_frame *f UNUSED) {
 		case SYS_EXEC :
 		case SYS_FORK :
 		case SYS_CREATE :
+		case SYS_REMOVE :
 		case SYS_OPEN : {
 			const char *fn_copy = (const char*)f->R.rdi;
 			while (true) {
@@ -70,8 +72,7 @@ is_valid (struct intr_frame *f UNUSED) {
 			break;
 		}
 		case SYS_READ :
-		case SYS_WRITE :
-		{
+		case SYS_WRITE : {
 			if (f->R.rsi == NULL || is_kernel_vaddr (f->R.rsi))
 				return false;
 			if ((uint64_t)KERN_BASE - f->R.rsi < f->R.rdx)
@@ -92,6 +93,7 @@ is_valid (struct intr_frame *f UNUSED) {
 	}
 	return true;
 }
+
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
@@ -143,6 +145,12 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			f->R.rax = filesys_create (f->R.rdi, f->R.rsi);
 			break;
 		case SYS_REMOVE :
+			if (!is_valid (f)) {
+				curr->ss->exit_status = -1;
+				thread_exit ();
+				NOT_REACHED ();
+			}
+			f->R.rax = filesys_remove (f->R.rdi);
 			break;
 		case SYS_OPEN :
 		{
@@ -232,7 +240,33 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			break;
 		
 		case SYS_SEEK :
+			if (!is_valid (f)) {
+				curr->ss->exit_status = -1;
+				thread_exit ();
+				NOT_REACHED ();
+			}
+			for (struct list_elem *e = list_begin (&curr->fd_table); e != list_end (&curr->fd_table); e = e->next) {
+				struct fd_entry *fde = list_entry (e, struct fd_entry, elem);
+				if (fde->fd == f->R.rdi) {
+					file_seek(fde->file, f->R.rsi);
+					break;
+				}
+			}
+			break;
 		case SYS_TELL :
+			if (!is_valid (f)) {
+				curr->ss->exit_status = -1;
+				thread_exit ();
+				NOT_REACHED ();
+			}
+			for (struct list_elem *e = list_begin (&curr->fd_table); e != list_end (&curr->fd_table); e = e->next) {
+				struct fd_entry *fde = list_entry (e, struct fd_entry, elem);
+				if (fde->fd == f->R.rdi) {
+					f->R.rax = file_tell(fde->file);
+					break;
+				}
+			}
+			break;
 		case SYS_CLOSE :
 			for (struct list_elem *e = list_begin (&curr->fd_table); e != list_end (&curr->fd_table); e = e->next) {
 				struct fd_entry *fde = list_entry (e, struct fd_entry, elem);
