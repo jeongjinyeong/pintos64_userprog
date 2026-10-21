@@ -166,7 +166,9 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		{
 			valid_handler (f);
 			f->R.rax = -1;
+			lock_acquire (&filesys_lock);
 			struct file *file = filesys_open (f->R.rdi);
+			lock_release (&filesys_lock);
 			if (file == NULL) {
 				break;
 			}
@@ -276,7 +278,9 @@ syscall_handler (struct intr_frame *f UNUSED) {
 				break;
 				
 			if (f->R.rdi == fde->fd) {
+				lock_acquire (&filesys_lock);
 				file_close (fde->file);
+				lock_release (&filesys_lock);
 				list_remove (&fde->elem);
 				free (fde);
 			}
