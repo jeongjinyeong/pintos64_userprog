@@ -71,8 +71,7 @@ is_valid (struct intr_frame *f UNUSED) {
 			break;
 		}
 		case SYS_READ :
-		case SYS_WRITE :
-		{
+		case SYS_WRITE : {
 			if (f->R.rsi == NULL || is_kernel_vaddr (f->R.rsi))
 				return false;
 			if ((uint64_t)KERN_BASE - f->R.rsi < f->R.rdx)
@@ -101,10 +100,26 @@ valid_handler (struct intr_frame *f) {
 		NOT_REACHED ();
 	}
 }
+
+struct fd_entry *
+find_file_discriptor (int fd) {
+	struct list_elem *e;
+	struct list *fd_table = &thread_current ()->fd_table;
+	
+	for (e = list_begin (fd_table); e != list_end (fd_table); e = list_next (e)) {
+		struct fd_entry *fd_e = list_entry (e, struct fd_entry, elem);
+
+		if (fd_e->fd == fd) 
+			return fd_e;
+	}
+	return NULL;
+}
+
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
 	struct thread *curr = thread_current ();
+	struct fd_entry *fde;
 	switch (f->R.rax) {
 		case SYS_HALT :
 			power_off();
@@ -155,7 +170,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			if (file == NULL) {
 				break;
 			}
-			struct fd_entry *fde = malloc (sizeof (struct fd_entry));
+			fde = malloc (sizeof (struct fd_entry));
 			if (fde == NULL) {
 				file_close (file);
 				break;
@@ -174,12 +189,16 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			f->R.rax = -1;
 			if (f->R.rdi == 0 || f->R.rdi == 1)
 				break;
-			for (struct list_elem *e = list_begin (&curr->fd_table); e != list_end (&curr->fd_table); e = list_next (e)){
-				if (f->R.rdi == list_entry (e, struct fd_entry, elem)->fd) {
-					f->R.rax = file_length (list_entry (e, struct fd_entry, elem)->file);
-					break;
-				}
-			}			
+			
+			fde = find_file_discriptor (f->R.rdi);
+			if (fde == NULL)
+				break;
+			
+			if (f->R.rdi == fde->fd) {
+				lock_acquire (&filesys_lock);
+				f->R.rax = file_length (fde->file);
+				lock_release (&filesys_lock);
+			}
 			break;
 		case SYS_READ :
 		{
@@ -193,13 +212,15 @@ syscall_handler (struct intr_frame *f UNUSED) {
 				break;
 			}
 			f->R.rax = -1;
-			for (struct list_elem *e = list_begin (&curr->fd_table); e != list_end (&curr->fd_table); e = list_next (e)){
-				if (f->R.rdi == list_entry (e, struct fd_entry, elem)->fd) {
-					lock_acquire (&filesys_lock);
-					f->R.rax = file_read (list_entry (e, struct fd_entry, elem)->file, (void *)f->R.rsi, f->R.rdx);
-					lock_release (&filesys_lock);
-					break;
-				}
+
+			fde = find_file_discriptor (f->R.rdi);
+			if (fde == NULL)
+				break;
+
+			if (f->R.rdi == fde->fd) {
+				lock_acquire (&filesys_lock);
+				f->R.rax = file_read (fde->file, (void *)f->R.rsi, f->R.rdx);
+				lock_release (&filesys_lock);
 			}
 			break;
 		}
@@ -211,48 +232,52 @@ syscall_handler (struct intr_frame *f UNUSED) {
 				break;
 			}
 			f->R.rax = -1;
-			for (struct list_elem *e = list_begin (&curr->fd_table); e != list_end (&curr->fd_table); e = e->next) {
-				struct fd_entry *fde = list_entry (e, struct fd_entry, elem);
-				if (fde->fd == f->R.rdi) {
-					lock_acquire (&filesys_lock);
-					f->R.rax = file_write (fde->file, f->R.rsi, f->R.rdx);
-					lock_release (&filesys_lock);
-					break;
-				}
+
+			fde = find_file_discriptor (f->R.rdi);
+			if (fde == NULL)
+				break;
+				
+			if (f->R.rdi == fde->fd) {
+				lock_acquire (&filesys_lock);
+				f->R.rax = file_write (fde->file, f->R.rsi, f->R.rdx);
+				lock_release (&filesys_lock);
 			}
 			break;
 		
 		case SYS_SEEK :
-			for (struct list_elem *e = list_begin (&curr->fd_table); e != list_end (&curr->fd_table); e = list_next (e)) {
-				struct fd_entry *fde = list_entry (e, struct fd_entry, elem);
-				if (fde->fd == f->R.rdi) {
-					lock_acquire (&filesys_lock);
-					file_seek (fde->file, f->R.rsi);
-					lock_release (&filesys_lock);
-					break;
-				}
+			fde = find_file_discriptor (f->R.rdi);
+			if (fde == NULL)
+				break;
+				
+			if (f->R.rdi == fde->fd) {
+				lock_acquire (&filesys_lock);
+				file_seek (fde->file, f->R.rsi);
+				lock_release (&filesys_lock);
 			}
 			break;
+
 		case SYS_TELL :
-			for (struct list_elem *e = list_begin (&curr->fd_table); e != list_end (&curr->fd_table); e = list_next (e)) {
-				struct fd_entry *fde = list_entry (e, struct fd_entry, elem);
-				if (fde->fd == f->R.rdi) {
-					lock_acquire (&filesys_lock);
-					f->R.rax = file_tell (fde->file);
-					lock_release (&filesys_lock);
-					break;
-				}
+			f->R.rax = -1;
+			fde = find_file_discriptor (f->R.rdi);
+			if (fde == NULL)
+				break;
+				
+			if (f->R.rdi == fde->fd) {
+				lock_acquire (&filesys_lock);
+				f->R.rax = file_tell(fde->file);
+				lock_release (&filesys_lock);
 			}
 			break;
+
 		case SYS_CLOSE :
-			for (struct list_elem *e = list_begin (&curr->fd_table); e != list_end (&curr->fd_table); e = e->next) {
-				struct fd_entry *fde = list_entry (e, struct fd_entry, elem);
-				if (fde->fd == f->R.rdi) {
-					file_close (fde->file);
-					list_remove (&fde->elem);
-					free (fde);
-					break;
-				}
+			fde = find_file_discriptor (f->R.rdi);
+			if (fde == NULL)
+				break;
+				
+			if (f->R.rdi == fde->fd) {
+				file_close (fde->file);
+				list_remove (&fde->elem);
+				free (fde);
 			}
 			break;
 		case SYS_DUP2 :
