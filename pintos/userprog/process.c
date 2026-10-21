@@ -590,6 +590,19 @@ load (const char *file_name, struct intr_frame *if_) {
 	free (copy);
 	success = true;
 
+	struct fd_entry *fde;
+	fde = malloc (sizeof (struct fd_entry));
+	if (fde == NULL)
+		goto done;
+	fde->file = file;
+	if (list_empty (&t->fd_table))
+		fde->fd = 2;
+	else
+		fde->fd = list_entry (list_back (&t->fd_table), struct fd_entry, elem)->fd + 1;
+	list_push_back (&t->fd_table, &fde->elem);
+	file_deny_write (file);
+	
+	return success;
 done:
 	/* We arrive here whether the load is successful or not. */
 
