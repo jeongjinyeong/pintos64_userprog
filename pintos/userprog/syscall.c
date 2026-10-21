@@ -49,6 +49,7 @@ syscall_init (void) {
 	write_msr(MSR_SYSCALL_MASK,
 			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
 }
+
 bool
 is_valid (struct intr_frame *f UNUSED) {
 	struct thread *curr = thread_current ();
@@ -56,22 +57,8 @@ is_valid (struct intr_frame *f UNUSED) {
 		case SYS_EXEC :
 		case SYS_FORK :
 		case SYS_CREATE :
-		case SYS_REMOVE : 
-		{
-			const char *fn_copy = (const char*)f->R.rdi;
-			while (true) {
-				if (is_user_vaddr (fn_copy) && pml4_get_page (curr->pml4, fn_copy)) {
-					if (*fn_copy == '\0')
-						break;
-					fn_copy++;
-				}
-				else
-					return false;
-			}		
-			break;
-		}
-		case SYS_OPEN : 
-		{
+		case SYS_REMOVE :
+		case SYS_OPEN : {
 			const char *fn_copy = (const char*)f->R.rdi;
 			while (true) {
 				if (is_user_vaddr (fn_copy) && pml4_get_page (curr->pml4, fn_copy)) {
@@ -85,8 +72,7 @@ is_valid (struct intr_frame *f UNUSED) {
 			break;
 		}
 		case SYS_READ :
-		case SYS_WRITE :
-		{
+		case SYS_WRITE : {
 			if (f->R.rsi == NULL || is_kernel_vaddr (f->R.rsi))
 				return false;
 			if ((uint64_t)KERN_BASE - f->R.rsi < f->R.rdx)
@@ -102,17 +88,12 @@ is_valid (struct intr_frame *f UNUSED) {
 				page_addr += PGSIZE;
 			}
 		}
-		case SYS_SEEK :
-			/* 파일이 열려있는지 확인 */
-			break;		
-		case SYS_TELL :
-
-			break;
 		default :
 			break;
 	}
 	return true;
 }
+
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
