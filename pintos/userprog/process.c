@@ -484,7 +484,7 @@ load (const char *file_name, struct intr_frame *if_) {
 	if (file == NULL) {
 		printf ("load: %s: open failed\n", argv[0]);
 		goto done;
-	}
+	}	
 
 	/* Read and verify executable header. */
 	if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
@@ -600,13 +600,11 @@ load (const char *file_name, struct intr_frame *if_) {
 		fde->fd = 2;
 	else
 		fde->fd = list_entry (list_back (&t->fd_table), struct fd_entry, elem)->fd + 1;
-	list_push_back (&t->fd_table, &fde->elem);
-	
+	list_push_back (&t->fd_table, &fde->elem);	
 	return success;
-
+	
 done:
-	/* We arrive here whether the load is successful or not. */
-
+	/* We arrive here whether the load is successful or not. */	
 	file_close (file);
 	return success;
 }
