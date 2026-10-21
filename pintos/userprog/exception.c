@@ -5,6 +5,7 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "intrinsic.h"
+#include "userprog/process.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -85,7 +86,7 @@ kill (struct intr_frame *f) {
 			   expected.  Kill the user process.  */
 			printf ("%s: dying due to interrupt %#04llx (%s).\n",
 					thread_name (), f->vec_no, intr_name (f->vec_no));
-			// intr_dump_frame (f);
+			intr_dump_frame (f);
 			thread_exit ();
 
 		case SEL_KCSEG:
@@ -93,7 +94,7 @@ kill (struct intr_frame *f) {
 			   Kernel code shouldn't throw exceptions.  (Page faults
 			   may cause kernel exceptions--but they shouldn't arrive
 			   here.)  Panic the kernel to make the point.  */
-			// intr_dump_frame (f);
+			intr_dump_frame (f);
 			PANIC ("Kernel bug - unexpected interrupt in kernel");
 
 		default:
@@ -139,6 +140,12 @@ page_fault (struct intr_frame *f) {
 	not_present = (f->error_code & PF_P) == 0;
 	write = (f->error_code & PF_W) != 0;
 	user = (f->error_code & PF_U) != 0;
+
+	if (user) {
+		thread_current ()->ss->exit_status = -1;
+		thread_exit ();
+		NOT_REACHED ();
+	}
 
 #ifdef VM
 	/* For project 3 and later. */
