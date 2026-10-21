@@ -150,7 +150,9 @@ syscall_handler (struct intr_frame *f UNUSED) {
 				thread_exit ();
 				NOT_REACHED ();
 			}
+			lock_acquire (&filesys_lock);
 			f->R.rax = filesys_remove (f->R.rdi);
+			lock_release (&filesys_lock);			
 			break;
 		case SYS_OPEN :
 		{
@@ -248,11 +250,14 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			for (struct list_elem *e = list_begin (&curr->fd_table); e != list_end (&curr->fd_table); e = e->next) {
 				struct fd_entry *fde = list_entry (e, struct fd_entry, elem);
 				if (fde->fd == f->R.rdi) {
-					file_seek(fde->file, f->R.rsi);
+					lock_acquire (&filesys_lock);
+					file_seek (fde->file, f->R.rsi);
+					lock_release (&filesys_lock);
 					break;
 				}
 			}
 			break;
+
 		case SYS_TELL :
 			if (!is_valid (f)) {
 				curr->ss->exit_status = -1;
@@ -262,7 +267,9 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			for (struct list_elem *e = list_begin (&curr->fd_table); e != list_end (&curr->fd_table); e = e->next) {
 				struct fd_entry *fde = list_entry (e, struct fd_entry, elem);
 				if (fde->fd == f->R.rdi) {
-					f->R.rax = file_tell(fde->file);
+					lock_acquire (&filesys_lock);					
+					f->R.rax = file_tell(fde->file);					
+					lock_release (&filesys_lock);
 					break;
 				}
 			}
