@@ -484,7 +484,7 @@ load (const char *file_name, struct intr_frame *if_) {
 	if (file == NULL) {
 		printf ("load: %s: open failed\n", argv[0]);
 		goto done;
-	}	
+	}
 
 	/* Read and verify executable header. */
 	if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
