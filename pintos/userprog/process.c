@@ -186,16 +186,25 @@ __do_fork (void *aux) {
 	 * TODO:       the resources of parent.*/
 	intr_set_level (old_level);
 
+	while (!list_empty (&current->fd_table)) {
+		free (list_entry (list_pop_front (&current->fd_table), struct fd_entry, elem));
+
+	}
+	list_init (&current->fd_table);
 	for (struct list_elem *e = list_begin (&parent->fd_table); e != list_end (&parent->fd_table); e = list_next (e)) {
 		struct fd_entry *fde_copy = malloc (sizeof (struct fd_entry));
 		if (fde_copy == NULL)
 			goto error;
 		struct fd_entry *fde = list_entry (e, struct fd_entry, elem);
 		fde_copy->fd = fde->fd;
-		fde_copy->file = file_duplicate (fde->file);
-		if (fde_copy->file == NULL) {
-			free (fde_copy);
-			goto error;
+		fde_copy->type = fde->type;
+		fde_copy->file = NULL;
+		if (fde->type == FD_FILE) {
+			fde_copy->file = file_duplicate (fde->file);
+			if (fde_copy->file == NULL) {
+				free (fde_copy);
+				goto error;
+			}
 		}
 		list_push_back (&current->fd_table, &fde_copy->elem);
 	}
@@ -322,7 +331,11 @@ process_exit (void) {
 		struct list_elem *e = list_pop_front (fd_table);
 		struct fd_entry *fde = list_entry (e, struct fd_entry, elem);
 
-		file_close (fde->file);
+		if (fde->type == FD_FILE) {
+			filesys_decr_ref (fde->file);
+			if (filesys_get_ref (fde->file) == 0)
+				file_close (fde->file);
+		}
 		free (fde);
 
 		intr_set_level(old_level);
@@ -595,6 +608,7 @@ load (const char *file_name, struct intr_frame *if_) {
 	if (fde == NULL)
 		goto done;
 	fde->file = file;
+	fde->type = FD_FILE;
 	if (list_empty (&t->fd_table))
 		fde->fd = 2;
 	else

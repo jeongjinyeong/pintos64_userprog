@@ -5,9 +5,16 @@
 #include "lib/kernel/list.h"
 
 struct inode;
+enum fd_type {
+  FD_FILE,
+  FD_STDIN,
+  FD_STDOUT
+};
+
 struct fd_entry {
   struct file *file;
   int fd;
+  enum fd_type type;
   struct list_elem elem;
 };
 
@@ -32,5 +39,13 @@ void file_allow_write (struct file *);
 void file_seek (struct file *, off_t);
 off_t file_tell (struct file *);
 off_t file_length (struct file *);
+
+void filesys_lock_init (void);
+void filesys_lock_acquire (void);
+void filesys_lock_release (void);
+int filesys_get_ref (struct file *file);
+void filesys_decr_ref (struct file *file);
+void filesys_incr_ref (struct file *file);
+void filesys_init_ref (struct file *file);
 
 #endif /* filesys/file.h */

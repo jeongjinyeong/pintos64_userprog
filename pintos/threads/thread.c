@@ -13,6 +13,7 @@
 #include "intrinsic.h"
 #ifdef USERPROG
 #include "userprog/process.h"
+#include "filesys/file.h"
 #endif
 
 /* Random value for struct thread's `magic' member.
@@ -319,6 +320,30 @@ thread_create (const char *name, int priority,
 	list_push_back(&thread_current()->children, &t->ss->elem);	
 
 	list_init (&t->fd_table);
+	struct fd_entry *stdin = malloc (sizeof (struct fd_entry));
+	if (stdin == NULL) {
+		list_remove (&t->ss->elem);
+		free (t->ss);
+		palloc_free_page (t);
+		return TID_ERROR;
+	}
+	struct fd_entry *stdout = malloc (sizeof (struct fd_entry));
+	if (stdout == NULL) {
+		free (stdin);
+		list_remove (&t->ss->elem);
+		free (t->ss);
+		palloc_free_page (t);
+		return TID_ERROR;
+	}
+	stdin->type = FD_STDIN;
+	stdin->file = NULL;
+	stdin->fd = 0;
+	stdout->type = FD_STDOUT;
+	stdout->file = NULL;
+	stdout->fd = 1;
+	list_push_back (&t->fd_table, &stdin->elem);
+	list_push_back (&t->fd_table, &stdout->elem);
+
 	/* Add to run queue. */
 	thread_unblock (t);
 

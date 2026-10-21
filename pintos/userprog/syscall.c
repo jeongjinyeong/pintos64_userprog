@@ -16,11 +16,10 @@
 #include "filesys/file.h"
 #include "filesys/filesys.h"
 #include "devices/input.h"
+#include "include/lib/string.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
-
-struct lock filesys_lock;
 
 /* System call.
  *
@@ -41,7 +40,7 @@ syscall_init (void) {
 			((uint64_t)SEL_KCSEG) << 32);
 	write_msr(MSR_LSTAR, (uint64_t) syscall_entry);
 
-	lock_init (&filesys_lock);
+	filesys_lock_init ();
 
 	/* The interrupt service rountine should not serve any interrupts
 	 * until the syscall_entry swaps the userland stack to the kernel
@@ -119,6 +118,13 @@ find_file_discriptor (int fd) {
 	return NULL;
 }
 
+bool
+less_fd (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) {
+	struct fd_entry *fde1 = list_entry (a, struct fd_entry, elem);
+	struct fd_entry *fde2 = list_entry (b, struct fd_entry, elem);
+	return fde1->fd < fde2->fd;
+}
+
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
@@ -160,24 +166,24 @@ syscall_handler (struct intr_frame *f UNUSED) {
 
 		case SYS_CREATE :
 			valid_handler (f);
-			lock_acquire (&filesys_lock);
+			filesys_lock_acquire ();
 			f->R.rax = filesys_create (f->R.rdi, f->R.rsi);
-			lock_release (&filesys_lock);
+			filesys_lock_release ();
 			break;
 
 		case SYS_REMOVE :
 			valid_handler (f);
-			lock_acquire (&filesys_lock);
+			filesys_lock_acquire ();
 			f->R.rax = filesys_remove (f->R.rdi);
-			lock_release (&filesys_lock);
+			filesys_lock_release ();
 			break;
 
 		case SYS_OPEN : {
 			valid_handler (f);
 			f->R.rax = -1;
-			lock_acquire (&filesys_lock);
+			filesys_lock_acquire ();
 			struct file *file = filesys_open (f->R.rdi);
-			lock_release (&filesys_lock);
+			filesys_lock_release ();
 			if (file == NULL) {
 				break;
 			}
@@ -188,6 +194,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 				break;
 			}
 			fde->file = file;
+			fde->type = FD_FILE;
 
 			if (list_empty (&curr->fd_table))
 				fde->fd = 2;
@@ -207,54 +214,54 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			if (fde == NULL)
 				break;
 			
-			if (f->R.rdi == fde->fd) {
-				lock_acquire (&filesys_lock);
+			if (fde->type == FD_FILE) {
+				filesys_lock_acquire ();
 				f->R.rax = file_length (fde->file);
-				lock_release (&filesys_lock);
+				filesys_lock_release ();
 			}
 			break;
 
 		case SYS_READ :	{
 			valid_handler (f);
+			fde = find_file_discriptor (f->R.rdi);
+			f->R.rax = -1;
+			if (fde == NULL) 
+				break;
 
-			if (f->R.rdi == STDIN_FILENO) {
+			if (fde->type == FD_STDIN) {
 				char *buffer = (char *)f->R.rsi;
 				for (size_t i = 0; i < f->R.rdx; i++) 
 					buffer[i] = input_getc ();
 				f->R.rax = f->R.rdx;
 				break;
 			}
-			f->R.rax = -1;
 
-			fde = find_file_discriptor (f->R.rdi);
-			if (fde == NULL)
-				break;
-
-			if (f->R.rdi == fde->fd) {
-				lock_acquire (&filesys_lock);
+			if (fde->type == FD_FILE) {
+				filesys_lock_acquire ();
 				f->R.rax = file_read (fde->file, (void *)f->R.rsi, f->R.rdx);
-				lock_release (&filesys_lock);
+				filesys_lock_release ();
 			}
 			break;
 		}
 
 		case SYS_WRITE :
 			valid_handler (f);
-			if (f->R.rdi == STDOUT_FILENO) {
+			fde = find_file_discriptor (f->R.rdi);
+			f->R.rax = -1;
+			if (fde == NULL)
+				break;
+
+			if (fde->type == FD_STDOUT) {
 				putbuf ((char *)f->R.rsi, f->R.rdx);
 				f->R.rax = f->R.rdx;
 				break;
 			}
 			f->R.rax = -1;
 
-			fde = find_file_discriptor (f->R.rdi);
-			if (fde == NULL)
-				break;
-				
-			if (f->R.rdi == fde->fd) {
-				lock_acquire (&filesys_lock);
+			if (fde->type == FD_FILE) {
+				filesys_lock_acquire ();
 				f->R.rax = file_write (fde->file, f->R.rsi, f->R.rdx);
-				lock_release (&filesys_lock);
+				filesys_lock_release ();
 			}
 			break;
 		
@@ -263,10 +270,10 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			if (fde == NULL)
 				break;
 				
-			if (f->R.rdi == fde->fd) {
-				lock_acquire (&filesys_lock);
+			if (fde->type == FD_FILE) {
+				filesys_lock_acquire ();
 				file_seek (fde->file, f->R.rsi);
-				lock_release (&filesys_lock);
+				filesys_lock_release ();
 			}
 			break;
 
@@ -276,10 +283,10 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			if (fde == NULL)
 				break;
 				
-			if (f->R.rdi == fde->fd) {
-				lock_acquire (&filesys_lock);
+			if (fde->type == FD_FILE) {
+				filesys_lock_acquire ();
 				f->R.rax = file_tell(fde->file);
-				lock_release (&filesys_lock);
+				filesys_lock_release ();
 			}
 			break;
 
@@ -287,17 +294,52 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			fde = find_file_discriptor (f->R.rdi);
 			if (fde == NULL)
 				break;
-				
-			if (f->R.rdi == fde->fd) {
-				lock_acquire (&filesys_lock);
-				file_close (fde->file);
-				lock_release (&filesys_lock);
-				list_remove (&fde->elem);
-				free (fde);
+
+			if (f->R.rdi == fde->fd && fde->type == FD_FILE) {
+				filesys_decr_ref (fde->file);
+				if (filesys_get_ref (fde->file) == 0) {
+					filesys_lock_acquire ();
+					file_close (fde->file);
+					filesys_lock_release ();
+				}
 			}
+			list_remove (&fde->elem);
+			free (fde);	
 			break;
 
 		case SYS_DUP2 :
+			/* rdi = oldfd, rsi = newfd*/
+			struct fd_entry *old_fde;
+			if ((old_fde = find_file_discriptor (f->R.rdi)) == NULL) {
+				f->R.rax = -1;
+				break;
+			}
+			if (f->R.rdi == f->R.rsi) {
+				f->R.rax = f->R.rsi;
+				break;
+			}
+			struct fd_entry *temp;
+			if ((temp = find_file_discriptor (f->R.rsi)) != NULL) {
+				if (temp->type == FD_FILE) {
+					filesys_decr_ref (temp->file);
+					if (filesys_get_ref (temp->file) == 0) 
+						file_close (temp->file);
+				}
+				list_remove (&temp->elem);
+				free (temp);
+			}
+
+			struct fd_entry *new_fde;
+			new_fde = malloc (sizeof (struct fd_entry));
+			if (new_fde == NULL)
+				break;
+			memcpy (new_fde, old_fde, sizeof (struct fd_entry));
+			new_fde->fd = f->R.rsi;
+			list_insert_ordered (&curr->fd_table, &new_fde->elem, less_fd, NULL);
+			f->R.rax = new_fde->fd;
+			if (old_fde->type == FD_FILE)
+				filesys_incr_ref (old_fde->file);
+			break;
 		case SYS_MMAP :
 		case SYS_MUNMAP :
 		case SYS_CHDIR :
