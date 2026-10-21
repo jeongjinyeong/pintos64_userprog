@@ -56,6 +56,7 @@ is_valid (struct intr_frame *f UNUSED) {
 		case SYS_EXEC :
 		case SYS_FORK :
 		case SYS_CREATE :
+		case SYS_REMOVE :
 		case SYS_OPEN : {
 			const char *fn_copy = (const char*)f->R.rdi;
 			while (true) {
@@ -136,9 +137,15 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			break;
 		case SYS_CREATE :
 			valid_handler (f);
+			lock_acquire (&filesys_lock);
 			f->R.rax = filesys_create (f->R.rdi, f->R.rsi);
+			lock_release (&filesys_lock);
 			break;
 		case SYS_REMOVE :
+			valid_handler (f);
+			lock_acquire (&filesys_lock);
+			f->R.rax = filesys_remove (f->R.rdi);
+			lock_release (&filesys_lock);
 			break;
 		case SYS_OPEN :
 		{
