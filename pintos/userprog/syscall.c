@@ -92,6 +92,7 @@ is_valid (struct intr_frame *f UNUSED) {
 	}
 	return true;
 }
+
 void
 valid_handler (struct intr_frame *f) {
 	if (!is_valid (f)) {
@@ -203,7 +204,6 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		case SYS_READ :
 		{
 			valid_handler (f);
-
 			if (f->R.rdi == STDIN_FILENO) {
 				char *buffer = (char *)f->R.rsi;
 				for (size_t i = 0; i < f->R.rdx; i++) 
