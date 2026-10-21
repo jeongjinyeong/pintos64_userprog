@@ -170,6 +170,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			if (file == NULL) {
 				break;
 			}
+
 			fde = malloc (sizeof (struct fd_entry));
 			if (fde == NULL) {
 				file_close (file);
