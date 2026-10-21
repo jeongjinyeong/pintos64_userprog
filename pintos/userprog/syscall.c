@@ -49,6 +49,7 @@ syscall_init (void) {
 	write_msr(MSR_SYSCALL_MASK,
 			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
 }
+
 bool
 is_valid (struct intr_frame *f UNUSED) {
 	struct thread *curr = thread_current ();
@@ -204,6 +205,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		case SYS_READ :
 		{
 			valid_handler (f);
+
 			if (f->R.rdi == STDIN_FILENO) {
 				char *buffer = (char *)f->R.rsi;
 				for (size_t i = 0; i < f->R.rdx; i++) 
