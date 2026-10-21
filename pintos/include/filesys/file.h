@@ -8,6 +8,7 @@ struct inode;
 struct fd_entry {
   struct file *file;
   int fd;
+  bool is_stdin;
   struct list_elem elem;
 };
 
@@ -32,5 +33,9 @@ void file_allow_write (struct file *);
 void file_seek (struct file *, off_t);
 off_t file_tell (struct file *);
 off_t file_length (struct file *);
+
+void filesys_lock_init ();
+void filesys_lock_acquire ();
+void filesys_lock_release ();
 
 #endif /* filesys/file.h */

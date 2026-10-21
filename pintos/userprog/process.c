@@ -185,19 +185,30 @@ __do_fork (void *aux) {
 	 * TODO:       from the fork() until this function successfully duplicates
 	 * TODO:       the resources of parent.*/
 	intr_set_level (old_level);
-
+	while (!list_empty (&current->fd_table)) {
+		struct fd_entry *fde_copy = list_entry(list_pop_front (&current->fd_table), struct fd_entry, elem);
+		free (fde_copy);
+	}
 	for (struct list_elem *e = list_begin (&parent->fd_table); e != list_end (&parent->fd_table); e = list_next (e)) {
 		struct fd_entry *fde_copy = malloc (sizeof (struct fd_entry));
 		if (fde_copy == NULL)
 			goto error;
 		struct fd_entry *fde = list_entry (e, struct fd_entry, elem);
 		fde_copy->fd = fde->fd;
-		fde_copy->file = file_duplicate (fde->file);
-		if (fde_copy->file == NULL) {
-			free (fde_copy);
-			goto error;
+		fde_copy->is_stdin = fde->is_stdin;
+		filesys_lock_acquire ();
+		if (fde->file != NULL) {
+			fde_copy->file = file_duplicate (fde->file);
+			if (fde_copy->file == NULL) {
+				free (fde_copy);
+				goto error;
+			}
 		}
-		list_push_back (&current->fd_table, &fde_copy->elem);
+		else
+			fde_copy->file = NULL;
+		filesys_lock_release ();
+
+		list_insert_ordered (&current->fd_table, &fde_copy->elem, compare_fd, NULL);
 	}
 	process_init ();
 	
@@ -209,11 +220,13 @@ __do_fork (void *aux) {
 		do_iret (&if_);
 	}
 error:
+	filesys_lock_acquire ();
 	while (!list_empty (&current->fd_table)) {
 		struct fd_entry *tmp = list_entry (list_pop_front (&current->fd_table), struct fd_entry, elem);
 		file_close (tmp->file);
 		free (tmp);
 	}
+	filesys_lock_release ();
 	fs->success = false;
 	sema_up (&fs->sema);
 	thread_exit ();
@@ -316,17 +329,31 @@ process_exit (void) {
 		intr_set_level(old_level);
 	}
 
+	filesys_lock_acquire ();
+	enum intr_level old_level = intr_disable ();
 	while (!list_empty(fd_table)) {
-		enum intr_level old_level = intr_disable ();
-
-		struct list_elem *e = list_pop_front (fd_table);
+		int dup_cnt = 0;
+		struct list_elem *e = list_front (fd_table);
 		struct fd_entry *fde = list_entry (e, struct fd_entry, elem);
 
+		for (e = list_next (e); e != list_end (fd_table); e = list_next (e)) {
+			struct fd_entry *fde_next = list_entry (e, struct fd_entry, elem);
+			if (fde->file == fde_next->file && fde->is_stdin == fde_next->is_stdin)
+				dup_cnt++;
+		}
+
+		if (dup_cnt > 0) {
+			list_remove (&fde->elem);
+			free (fde);
+			continue;
+		}
+			
+		list_remove (&fde->elem);
 		file_close (fde->file);
 		free (fde);
-
-		intr_set_level(old_level);
 	}
+	intr_set_level(old_level);
+	filesys_lock_release ();
 	
 	self_ss = curr->ss;
 	process_cleanup ();
@@ -334,7 +361,7 @@ process_exit (void) {
 	if (self_ss == NULL) 	
 		return;	
 		
-	enum intr_level old_level = intr_disable();	
+	old_level = intr_disable();	
 
 	if (pml4 != NULL)
 		printf ("%s: exit(%d)\n", curr->name, self_ss->exit_status);
@@ -463,6 +490,8 @@ load (const char *file_name, struct intr_frame *if_) {
 	int argc = 0;
 	char *token;
 
+	bool fs_locked = false;
+
 	/* Allocate and activate page directory. */
 	t->pml4 = pml4_create ();
 	if (t->pml4 == NULL)
@@ -480,13 +509,17 @@ load (const char *file_name, struct intr_frame *if_) {
 		argv[argc++] = token;
 
 	/* Open executable file. */
+	filesys_lock_acquire ();
 	file = filesys_open (argv[0]);
+	filesys_lock_release ();
 	if (file == NULL) {
 		printf ("load: %s: open failed\n", argv[0]);
 		goto done;
 	}
 
 	/* Read and verify executable header. */
+	filesys_lock_acquire ();
+	fs_locked = true;
 	if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
 			|| memcmp (ehdr.e_ident, "\177ELF\2\1\1", 7)
 			|| ehdr.e_type != 2
@@ -497,18 +530,24 @@ load (const char *file_name, struct intr_frame *if_) {
 		printf ("load: %s: error loading executable\n", argv[0]);
 		goto done;
 	}
+	filesys_lock_release ();
+	fs_locked = false;
 
 	/* Read program headers. */
 	file_ofs = ehdr.e_phoff;
 	for (i = 0; i < ehdr.e_phnum; i++) {
 		struct Phdr phdr;
 
+		filesys_lock_acquire ();
+		fs_locked = true;
 		if (file_ofs < 0 || file_ofs > file_length (file))
 			goto done;
 		file_seek (file, file_ofs);
 
 		if (file_read (file, &phdr, sizeof phdr) != sizeof phdr)
 			goto done;
+		filesys_lock_release ();
+		fs_locked = false;
 		file_ofs += sizeof phdr;
 		switch (phdr.p_type) {
 			case PT_NULL:
@@ -599,14 +638,21 @@ load (const char *file_name, struct intr_frame *if_) {
 		fde->fd = 2;
 	else
 		fde->fd = list_entry (list_back (&t->fd_table), struct fd_entry, elem)->fd + 1;
-	list_push_back (&t->fd_table, &fde->elem);
+	list_insert_ordered (&t->fd_table, &fde->elem, compare_fd, NULL);
+	filesys_lock_acquire ();
 	file_deny_write (file);
+	filesys_lock_release ();
 	return success;
 
 done:
 	/* We arrive here whether the load is successful or not. */
+	if (fs_locked)
+		filesys_lock_release ();
+	
 	free (copy);
+	filesys_lock_acquire ();
 	file_close (file);
+	filesys_lock_release ();
 	return success;
 }
 
