@@ -49,6 +49,7 @@ syscall_init (void) {
 	write_msr(MSR_SYSCALL_MASK,
 			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
 }
+
 bool
 is_valid (struct intr_frame *f UNUSED) {
 	struct thread *curr = thread_current ();
@@ -71,8 +72,7 @@ is_valid (struct intr_frame *f UNUSED) {
 			break;
 		}
 		case SYS_READ :
-		case SYS_WRITE :
-		{
+		case SYS_WRITE : {
 			if (f->R.rsi == NULL || is_kernel_vaddr (f->R.rsi))
 				return false;
 			if ((uint64_t)KERN_BASE - f->R.rsi < f->R.rdx)
@@ -93,6 +93,7 @@ is_valid (struct intr_frame *f UNUSED) {
 	}
 	return true;
 }
+
 void
 valid_handler (struct intr_frame *f) {
 	if (!is_valid (f)) {
@@ -101,6 +102,7 @@ valid_handler (struct intr_frame *f) {
 		NOT_REACHED ();
 	}
 }
+
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
@@ -184,7 +186,6 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		case SYS_READ :
 		{
 			valid_handler (f);
-
 			if (f->R.rdi == STDIN_FILENO) {
 				char *buffer = (char *)f->R.rsi;
 				for (size_t i = 0; i < f->R.rdx; i++) 
