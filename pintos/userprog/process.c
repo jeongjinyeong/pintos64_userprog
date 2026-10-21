@@ -486,20 +486,6 @@ load (const char *file_name, struct intr_frame *if_) {
 		goto done;
 	}
 
-	/* fd 추가 */
-	file_deny_write (file);
-	struct fd_entry *fde = malloc (sizeof (struct fd_entry));
-	if (fde == NULL) {
-		goto done;
-	}
-	fde->file = file;
-
-	if (list_empty (&t->fd_table))
-		fde->fd = 2;
-	else
-		fde->fd = list_entry (list_back (&t->fd_table), struct fd_entry, elem)->fd + 1;
-	list_push_back (&t->fd_table, &fde->elem);
-
 	/* Read and verify executable header. */
 	if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
 			|| memcmp (ehdr.e_ident, "\177ELF\2\1\1", 7)
@@ -604,9 +590,22 @@ load (const char *file_name, struct intr_frame *if_) {
 	free (copy);
 	success = true;
 
+	struct fd_entry *fde;
+	fde = malloc (sizeof (struct fd_entry));
+	if (fde == NULL)
+		goto done;
+	fde->file = file;
+	if (list_empty (&t->fd_table))
+		fde->fd = 2;
+	else
+		fde->fd = list_entry (list_back (&t->fd_table), struct fd_entry, elem)->fd + 1;
+	list_push_back (&t->fd_table, &fde->elem);
+	file_deny_write (file);
+	
 	return success;
 done:
 	/* We arrive here whether the load is successful or not. */
+	free (copy);
 	file_close (file);
 	return success;
 }

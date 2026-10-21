@@ -49,6 +49,7 @@ syscall_init (void) {
 	write_msr(MSR_SYSCALL_MASK,
 			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
 }
+
 bool
 is_valid (struct intr_frame *f UNUSED) {
 	struct thread *curr = thread_current ();
@@ -92,6 +93,7 @@ is_valid (struct intr_frame *f UNUSED) {
 	}
 	return true;
 }
+
 void
 valid_handler (struct intr_frame *f) {
 	if (!is_valid (f)) {
