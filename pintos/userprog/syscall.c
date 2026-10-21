@@ -71,6 +71,7 @@ is_valid (struct intr_frame *f UNUSED) {
 			}
 			break;
 		}
+
 		case SYS_READ :
 		case SYS_WRITE : {
 			if (f->R.rsi == NULL || is_kernel_vaddr (f->R.rsi))
@@ -88,6 +89,7 @@ is_valid (struct intr_frame *f UNUSED) {
 				page_addr += PGSIZE;
 			}
 		}
+
 		default :
 			break;
 	}
@@ -126,17 +128,19 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		case SYS_HALT :
 			power_off();
 			break;
+
 		case SYS_EXIT :
 			curr->ss->exit_status = f->R.rdi;		
 			thread_exit ();
 			NOT_REACHED ();
 			break;
+
 		case SYS_FORK :
 			valid_handler (f);
 			f->R.rax = process_fork (f->R.rdi, f);
 			break;
-		case SYS_EXEC :
-		{
+
+		case SYS_EXEC : {
 			valid_handler (f);
 			char *file_name = palloc_get_page (PAL_ZERO);
 			if (file_name == NULL) {
@@ -149,23 +153,26 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			thread_exit ();
 			break;
 		}
+
 		case SYS_WAIT :
 			f->R.rax = process_wait ((tid_t)f->R.rdi);
 			break;
+
 		case SYS_CREATE :
 			valid_handler (f);
 			lock_acquire (&filesys_lock);
 			f->R.rax = filesys_create (f->R.rdi, f->R.rsi);
 			lock_release (&filesys_lock);
 			break;
+
 		case SYS_REMOVE :
 			valid_handler (f);
 			lock_acquire (&filesys_lock);
 			f->R.rax = filesys_remove (f->R.rdi);
 			lock_release (&filesys_lock);
 			break;
-		case SYS_OPEN :
-		{
+
+		case SYS_OPEN : {
 			valid_handler (f);
 			f->R.rax = -1;
 			lock_acquire (&filesys_lock);
@@ -190,6 +197,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			f->R.rax = fde->fd;
 			break;
 		}
+
 		case SYS_FILESIZE :
 			f->R.rax = -1;
 			if (f->R.rdi == 0 || f->R.rdi == 1)
@@ -205,8 +213,8 @@ syscall_handler (struct intr_frame *f UNUSED) {
 				lock_release (&filesys_lock);
 			}
 			break;
-		case SYS_READ :
-		{
+
+		case SYS_READ :	{
 			valid_handler (f);
 
 			if (f->R.rdi == STDIN_FILENO) {
@@ -229,6 +237,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			}
 			break;
 		}
+
 		case SYS_WRITE :
 			valid_handler (f);
 			if (f->R.rdi == STDOUT_FILENO) {
@@ -287,6 +296,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 				free (fde);
 			}
 			break;
+
 		case SYS_DUP2 :
 		case SYS_MMAP :
 		case SYS_MUNMAP :
@@ -305,4 +315,3 @@ syscall_handler (struct intr_frame *f UNUSED) {
 	}
 	return;
 }
-
