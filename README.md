@@ -129,3 +129,30 @@ git push -u origin main
 - `git push`: 새로운 리포에 최초 업로드(Push)합니다.
 
 이 과정을 거치면 기존 리포와의 연결은 완전히 제거되고, **새로운 독립적인 프로젝트로 관리**할 수 있습니다.
+
+---
+
+### CRLF / LF 차이로 make되지 않는 경우 사용
+
+```
+source /workspaces/pintos64_userprog/pintos/activate
+
+mkdir -p /tmp/pintos64_userprog-bin
+
+cat > /tmp/pintos64_userprog-bin/pintos <<'EOF'
+#!/bin/sh
+exec python3 /workspaces/pintos64_userprog/pintos/utils/pintos "$@"
+EOF
+
+chmod +x /tmp/pintos64_userprog-bin/pintos
+
+export PATH="/tmp/pintos64_userprog-bin:$PATH"
+hash -r
+
+command -v pintos
+
+cd /workspaces/pintos64_userprog/pintos/userprog
+make
+cd build
+```
+
