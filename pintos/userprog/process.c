@@ -61,6 +61,7 @@ process_create_initd (const char *file_name) {
 	tid = thread_create (name, PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
+	free (name);
 	return tid;
 }
 
