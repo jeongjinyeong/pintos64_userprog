@@ -136,6 +136,7 @@ void thread_print_stats (void);
 bool less_deadline(const struct list_elem *e1, const struct list_elem *e2, void *aux UNUSED);
 bool greater_priority(const struct list_elem *e1, const struct list_elem *e2, void *aux UNUSED);
 bool greater_priority_donor_insert_ordered (const struct list_elem *e1, const struct list_elem *e2, void *aux UNUSED);
+bool compare_fd (const struct list_elem *e1, const struct list_elem *e2, void *aux UNUSED);
 void ready_list_sort (void);
 
 void yield_priority_handler (struct thread *t);

@@ -3,6 +3,7 @@
 #include "filesys/inode.h"
 #include "threads/malloc.h"
 #include "threads/thread.h"
+#include "threads/synch.h"
 
 /* An open file. */
 struct file {
@@ -159,4 +160,22 @@ off_t
 file_tell (struct file *file) {
 	ASSERT (file != NULL);
 	return file->pos;
+}
+
+/* filesys lock */
+static struct lock filesys_lock;
+
+void
+filesys_lock_init (void) {
+	lock_init (&filesys_lock);
+}
+
+void
+filesys_lock_acquire (void) {
+	lock_acquire (&filesys_lock);
+}
+
+void
+filesys_lock_release (void) {
+	lock_release (&filesys_lock);
 }

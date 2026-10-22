@@ -13,6 +13,7 @@
 #include "intrinsic.h"
 #ifdef USERPROG
 #include "userprog/process.h"
+#include "filesys/file.h"
 #endif
 
 /* Random value for struct thread's `magic' member.
@@ -184,6 +185,14 @@ greater_priority_donor_insert_ordered (const struct list_elem *e1, const struct 
 	return t1->priority > t2->priority ? true : false;
 }
 
+/* fd 정렬을 위한 비교 함수 */
+bool
+compare_fd (const struct list_elem *e1, const struct list_elem *e2, void *aux UNUSED) {
+	struct fd_entry *fd1 = list_entry(e1, struct fd_entry, elem);
+	struct fd_entry *fd2 = list_entry(e2, struct fd_entry, elem);
+	return fd1->fd < fd2->fd;
+}
+
 void
 ready_list_sort (void) {
 	list_sort(&ready_list, greater_priority, NULL);
@@ -324,6 +333,31 @@ thread_create (const char *name, int priority,
 
 	/* Compare priority to current thread */
 	yield_priority_handler(t);
+
+	/* 표준 입출력 초기화*/
+	struct fd_entry *fde_stdin = malloc (sizeof (struct fd_entry));
+	if (!fde_stdin) {
+		palloc_free_page(t);
+		list_remove (&t->ss->elem);
+		free (t->ss);
+		return TID_ERROR;
+	}
+	struct fd_entry *fde_stdout = malloc (sizeof (struct fd_entry));
+	if (!fde_stdout) {
+		palloc_free_page(t);
+		list_remove (&t->ss->elem);
+		free (t->ss);
+		free (fde_stdin);
+		return TID_ERROR;
+	}
+	fde_stdin->file = NULL;
+	fde_stdout->file = NULL;
+	fde_stdin->fd = 0;
+	fde_stdout->fd = 1;
+	fde_stdin->is_stdin = true;
+	fde_stdout->is_stdin = false;
+	list_insert_ordered (&t->fd_table, &fde_stdin->elem, compare_fd, NULL);
+	list_insert_ordered (&t->fd_table, &fde_stdout->elem, compare_fd, NULL);
 
 	return tid;
 }
