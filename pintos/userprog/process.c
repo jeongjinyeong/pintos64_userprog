@@ -186,10 +186,9 @@ __do_fork (void *aux) {
 	 * TODO:       the resources of parent.*/
 	intr_set_level (old_level);
 
-	while (!list_empty (&current->fd_table)) {
+	while (!list_empty (&current->fd_table)) 
 		free (list_entry (list_pop_front (&current->fd_table), struct fd_entry, elem));
 
-	}
 	list_init (&current->fd_table);
 	for (struct list_elem *e = list_begin (&parent->fd_table); e != list_end (&parent->fd_table); e = list_next (e)) {
 		struct fd_entry *fde_copy = malloc (sizeof (struct fd_entry));
