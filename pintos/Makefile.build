@@ -30,6 +30,14 @@ SOURCES = $(foreach dir,$(KERNEL_SUBDIRS),$($(dir)_SRC))
 OBJECTS = $(patsubst %.c,%.o,$(patsubst %.S,%.o,$(SOURCES)))
 DEPENDS = $(patsubst %.o,%.d,$(OBJECTS))
 
+BUILD_DIRS = $(sort $(addprefix $(CURDIR)/,$(KERNEL_SUBDIRS) $(TEST_SUBDIRS) lib/user))
+
+$(BUILD_DIRS):
+	mkdir -p $@
+
+$(OBJECTS) $(PROGS_OBJ) $(LIB_OBJ) $(PROGS) $(OUTPUTS) $(RESULTS) \
+lib/user/entry.o threads/loader.o threads/kernel.lds.s: | $(BUILD_DIRS)
+
 threads/kernel.lds.s: CPPFLAGS += -P
 threads/kernel.lds.s: threads/kernel.lds.S
 
